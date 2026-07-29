@@ -17,31 +17,30 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect } = React;
 
-    // --- CREDENCIALES ---
     const supabase = window.supabase.createClient(
       'https://bswlriuzeintgjioywtz.supabase.co',
       'sb_publishable_oIWpn-mNPUZaQPdf7HNU_Q_Lc7R6UOB'
     );
 
     function App() {
-      const [vistaActual, setVistaActual] = useState('mesa'); // 'mesa' | 'reservas'
+      const [vistaActual, setVistaActual] = useState('mesa');
       const [mesaParam, setMesaParam] = useState(null);
       const [user, setUser] = useState(null);
       const [userProfile, setUserProfile] = useState(null);
       const [productos, setProductos] = useState([]);
+      const [dbError, setDbError] = useState(null);
+      
       const [sesionActiva, setSesionActiva] = useState(null);
       const [hostName, setHostName] = useState('');
       const [rondas, setRondas] = useState([]);
       const [carrito, setCarrito] = useState([]);
       
-      // Nuevos Features
       const [ultimoPedido, setUltimoPedido] = useState(null);
       const [showReviewModal, setShowReviewModal] = useState(false);
       const [showJoinPrompt, setShowJoinPrompt] = useState(false);
       
-      // Estado UI general
       const [loading, setLoading] = useState(true);
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [email, setEmail] = useState('');
@@ -71,35 +70,27 @@
         if (mesaParam) verificarSesionMesa();
       }, [mesaParam, user]);
 
-      // REALTIME: Escuchar cambios en la mesa y rondas
       useEffect(() => {
         if (sesionActiva) {
           cargarRondasMesa(sesionActiva.id);
-          
           const channel = supabase.channel(`mesa_${sesionActiva.id}`)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_rondas' }, () => {
               cargarRondasMesa(sesionActiva.id);
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sesiones_mesa', filter: `id=eq.${sesionActiva.id}` }, (payload) => {
-              // EL SECUESTRADOR DE RESEÑAS: Si el estado cambia a pagada, esperamos 5 seg y lanzamos modal
-              if (payload.new.estado === 'pagada') {
-                setTimeout(() => setShowReviewModal(true), 5000); 
-              }
+              if (payload.new.estado === 'pagada') setTimeout(() => setShowReviewModal(true), 5000);
             })
             .subscribe();
           return () => supabase.removeChannel(channel);
         }
       }, [sesionActiva]);
 
-      // --- LOGICA DE BASE DE DATOS ---
-
       const procesarUsuario = async (authUser) => {
         setUser(authUser);
-        // Comprobar si existe en tabla usuarios para los puntos, si no, lo creamos
-        let { data } = await supabase.from('usuarios').select('*').eq('id', authUser.id).single();
+        let { data, error } = await supabase.from('usuarios').select('*').eq('id', authUser.id).single();
         if (!data) {
           const { data: newUser } = await supabase.from('usuarios')
-            .insert([{ id: authUser.id, email: authUser.email, puntos: 50 }]) // Regalamos 50 pts de bienvenida
+            .insert([{ id: authUser.id, email: authUser.email, puntos: 50 }]) // 50 pts de regalo
             .select().single();
           data = newUser;
         }
@@ -109,12 +100,12 @@
       };
 
       const cargarMenu = async () => {
-        const { data } = await supabase.from('productos').select('*').eq('activo', true);
-        if (data) setProductos(data);
+        const { data, error } = await supabase.from('productos').select('*').eq('activo', true);
+        if (error) setDbError(error.message);
+        else setProductos(data || []);
       };
 
       const buscarUltimoPedido = async (userId) => {
-        // Buscamos la última ronda de este usuario
         const { data: ultimasRondas } = await supabase.from('pedidos_rondas')
           .select('id').eq('usuario_id', userId).order('fecha', { ascending: false }).limit(1);
         
@@ -131,12 +122,10 @@
         
         if (data) {
           if (user && data.host_id !== user.id) {
-            // Ya hay mesa creada y yo no soy el host
             setHostName(data.host?.nombre || data.host?.email || 'Un amigo');
             setShowJoinPrompt(true);
             setSesionActiva(data);
           } else {
-            // Soy el host o no estoy logueado (puedo ver los pedidos)
             setSesionActiva(data);
           }
         }
@@ -144,7 +133,7 @@
 
       const cargarRondasMesa = async (idSesion) => {
         const { data } = await supabase.from('pedidos_rondas')
-          .select('*, items:items_pedido(*, producto:productos(nombre))').eq('sesion_id', idSesion);
+          .select('*, items:items_pedido(*, producto:productos(nombre, precio))').eq('sesion_id', idSesion);
         if (data) setRondas(data);
       };
 
@@ -183,11 +172,11 @@
           }));
           await supabase.from('items_pedido').insert(itemsInsert);
           
-          // Sumar puntos de fidelización
+          // Ganar 20 puntos por cada euro gastado (Para que se vea más rápido)
           const totalGastado = carrito.reduce((sum, p) => sum + p.precio, 0);
-          const puntosGanados = Math.floor(totalGastado * 2); // 2 puntos por Euro
+          const puntosGanados = Math.floor(totalGastado * 20); 
           await supabase.from('usuarios').update({ puntos: (userProfile?.puntos || 0) + puntosGanados }).eq('id', user.id);
-          procesarUsuario(user); // refrescar perfil local
+          procesarUsuario(user);
           
           setCarrito([]);
           cargarRondasMesa(idDeSesion);
@@ -197,35 +186,63 @@
       const pedirCuenta = async () => {
         if (!sesionActiva) return;
         await supabase.from('sesiones_mesa').update({ estado: 'pagando' }).eq('id', sesionActiva.id);
-        alert("El camarero ha sido notificado y trae la cuenta.");
-        // Simulamos que el camarero cobra y cierra la mesa tras 10 seg
+        alert("¡Has pedido la cuenta! El camarero irá a tu mesa.");
         setTimeout(async () => {
           await supabase.from('sesiones_mesa').update({ estado: 'pagada' }).eq('id', sesionActiva.id);
         }, 5000); 
       };
 
-      // --- COMPONENTES AUXILIARES ---
-
-      const UserHeader = () => {
+      // --- COMPONENTE: TARJETA DE BANCO (FIDELIZACIÓN) ---
+      const BankingCard = () => {
         if (!userProfile) return null;
-        let vipLvl = "Bronce"; let color = "bg-orange-600";
-        if (userProfile.puntos > 100) { vipLvl = "Plata"; color = "bg-gray-400"; }
-        if (userProfile.puntos > 500) { vipLvl = "Oro"; color = "bg-yellow-400 text-yellow-900"; }
+        
+        const pts = userProfile.puntos || 0;
+        const meta = 1500; // Meta para la burger gratis
+        const progreso = Math.min((pts / meta) * 100, 100);
+        
+        let vipLvl = "BRONCE"; let gradiente = "from-gray-800 to-gray-900";
+        if (pts > 500) { vipLvl = "PLATA"; gradiente = "from-gray-400 to-gray-600"; }
+        if (pts > 1500) { vipLvl = "ORO"; gradiente = "from-yellow-400 to-yellow-600"; }
 
         return (
-          <div className="bg-white p-3 mx-4 mt-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center">
-            <div>
-              <p className="text-sm font-bold text-gray-800">Hola, {userProfile.nombre || user.email.split('@')[0]}</p>
-              <p className="text-xs text-gray-500">{userProfile.puntos} puntos acumulados</p>
-            </div>
-            <div className={`${color} text-white text-xs font-black px-3 py-1.5 rounded-full uppercase tracking-wider`}>
-              VIP {vipLvl}
+          <div className="m-4">
+            <div className={`relative overflow-hidden rounded-3xl p-6 shadow-xl bg-gradient-to-br ${gradiente} text-white`}>
+              {/* Círculos decorativos de fondo */}
+              <div className="absolute -right-6 -top-6 w-32 h-32 rounded-full bg-white opacity-10"></div>
+              <div className="absolute -left-6 -bottom-6 w-24 h-24 rounded-full bg-white opacity-10"></div>
+              
+              <div className="relative z-10 flex justify-between items-start mb-6">
+                <div>
+                  <p className="text-white/70 text-xs font-bold uppercase tracking-widest mb-1">Bokalia Wallet</p>
+                  <p className="text-3xl font-black">{pts.toLocaleString()} <span className="text-lg font-medium opacity-80">pts</span></p>
+                </div>
+                <div className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest border border-white/30">
+                  {vipLvl}
+                </div>
+              </div>
+
+              <div className="relative z-10">
+                <div className="flex justify-between text-xs font-bold text-white/80 mb-2">
+                  <span>Meta: Burger Gratis</span>
+                  <span>{pts} / {meta}</span>
+                </div>
+                <div className="h-2 w-full bg-black/30 rounded-full overflow-hidden">
+                  <div className="h-full bg-white rounded-full transition-all duration-1000 ease-out" style={{ width: `${progreso}%` }}></div>
+                </div>
+                {pts < meta ? (
+                  <p className="text-[10px] text-white/60 mt-2 font-medium">Te faltan {meta - pts} pts. ¡Pide ahora para sumar!</p>
+                ) : (
+                  <p className="text-[10px] text-green-300 mt-2 font-bold uppercase">¡Has desbloqueado tu premio!</p>
+                )}
+              </div>
             </div>
           </div>
         );
       };
 
+      // --- VISTAS MENORES ---
       const ReviewModal = () => {
+        // [El modal de reseñas se mantiene igual]
         const [rating, setRating] = useState(0);
         const [msg, setMsg] = useState('');
         const [submitted, setSubmitted] = useState(false);
@@ -236,46 +253,29 @@
             setSubmitted(true);
             setTimeout(() => setShowReviewModal(false), 2000);
           } else {
-            // Es 4 o 5, lo mandamos a Google Maps
             window.open('https://maps.google.com', '_blank');
             setShowReviewModal(false);
           }
         };
 
         if (!showReviewModal) return null;
-
         return (
           <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-6 w-full max-w-sm text-center">
               {submitted ? (
-                <div>
-                  <h3 className="text-2xl font-black text-green-500 mb-2">¡Gracias!</h3>
-                  <p className="text-gray-600">Tomaremos nota para mejorar.</p>
-                </div>
+                <div><h3 className="text-2xl font-black text-green-500 mb-2">¡Gracias!</h3><p className="text-gray-600">Tomaremos nota.</p></div>
               ) : (
                 <div>
                   <h3 className="text-2xl font-black text-gray-800 mb-2">¿Qué tal tu comida?</h3>
-                  <p className="text-sm text-gray-500 mb-6">Valora tu experiencia en Bokalia</p>
+                  <p className="text-sm text-gray-500 mb-6">Valora tu experiencia</p>
                   <div className="flex justify-center gap-2 mb-6">
                     {[1,2,3,4,5].map(star => (
-                      <button key={star} onClick={() => setRating(star)} className={`text-4xl ${rating >= star ? 'text-yellow-400' : 'text-gray-200'}`}>★</button>
+                      <button key={star} onClick={() => setRating(star)} className={`text-5xl ${rating >= star ? 'text-yellow-400' : 'text-gray-200'} transition-colors`}>★</button>
                     ))}
                   </div>
-                  
-                  {rating > 0 && rating <= 3 && (
-                    <textarea 
-                      placeholder="¿Qué podemos mejorar? (Tu opinión nos ayuda mucho)" 
-                      value={msg} onChange={e => setMsg(e.target.value)}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm mb-4 h-24 outline-none"
-                    />
-                  )}
-
-                  {rating > 0 && (
-                    <button onClick={handleReview} className="w-full bg-red-600 text-white font-black py-3 rounded-xl">
-                      {rating >= 4 ? "¡Dejar reseña en Google!" : "Enviar feedback confidencial"}
-                    </button>
-                  )}
-                  <button onClick={() => setShowReviewModal(false)} className="mt-4 text-xs font-bold text-gray-400">Saltar por ahora</button>
+                  {rating > 0 && rating <= 3 && <textarea placeholder="¿Qué podemos mejorar?" value={msg} onChange={e => setMsg(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm mb-4 h-24 outline-none"/>}
+                  {rating > 0 && <button onClick={handleReview} className="w-full bg-red-600 text-white font-black py-4 rounded-xl">{rating >= 4 ? "¡Déjanos 5 estrellas en Google!" : "Enviar mensaje"}</button>}
+                  <button onClick={() => setShowReviewModal(false)} className="mt-4 text-xs font-bold text-gray-400">Cerrar</button>
                 </div>
               )}
             </div>
@@ -283,19 +283,17 @@
         );
       };
 
-      // --- VISTA: RESERVAS ---
       if (vistaActual === 'reservas') {
         return (
           <div className="min-h-screen bg-gray-50">
             <header className="bg-red-600 text-white p-4 flex gap-4">
-              <button onClick={() => setVistaActual('mesa')} className="font-bold text-red-200 hover:text-white">← Volver al Menú</button>
+              <button onClick={() => setVistaActual('mesa')} className="font-bold text-red-200 hover:text-white">← Volver</button>
               <h1 className="font-black text-yellow-400">BOKALIA RESERVAS</h1>
             </header>
             <div className="p-8 text-center mt-12">
               <div className="text-5xl mb-4">📅</div>
-              <h2 className="text-2xl font-black text-gray-800 mb-2">Módulo de reservas en construcción</h2>
-              <p className="text-gray-500">Pronto podrás reservar tu mesa favorita directamente desde aquí.</p>
-              {/* TODO: Insertar aquí código del sistema externo */}
+              <h2 className="text-2xl font-black text-gray-800 mb-2">Reservas en construcción</h2>
+              <p className="text-gray-500">Pronto disponible.</p>
             </div>
           </div>
         );
@@ -303,14 +301,15 @@
 
       // --- VISTA PRINCIPAL (MESA) ---
 
-      if (loading) return <div className="h-screen flex items-center justify-center font-bold text-red-600">Cargando...</div>;
+      if (loading) return <div className="h-screen flex items-center justify-center font-black text-red-600 text-2xl animate-pulse">BOKALIA</div>;
 
       if (!mesaParam) return (
         <div className="min-h-screen bg-yellow-50 flex flex-col justify-center items-center p-6 text-center">
-          <div className="bg-white p-8 rounded-3xl shadow-xl w-full">
-            <h1 className="text-4xl font-black text-red-600 mb-6">BOKALIA</h1>
-            <input type="number" id="inputMesa" className="text-center text-4xl font-black w-full p-4 rounded-2xl border-4 border-red-200 mb-6 outline-none focus:border-red-500" placeholder="Mesa nº" />
-            <button onClick={() => window.location.search = `?mesa=${document.getElementById('inputMesa').value}`} className="w-full bg-red-600 text-white font-black py-4 rounded-2xl text-xl">Entrar a la mesa</button>
+          <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md border-2 border-red-100">
+            <h1 className="text-5xl font-black text-red-600 mb-6 tracking-tighter">BOKALIA</h1>
+            <p className="text-gray-500 mb-6 font-bold">Introduce el número de tu mesa:</p>
+            <input type="number" id="inputMesa" className="text-center text-5xl font-black w-full p-4 rounded-2xl bg-gray-50 border-4 border-gray-200 mb-6 outline-none focus:border-red-500 transition-colors" placeholder="0" />
+            <button onClick={() => window.location.search = `?mesa=${document.getElementById('inputMesa').value}`} className="w-full bg-red-600 hover:bg-red-700 text-white font-black py-4 rounded-2xl text-xl shadow-lg transform active:scale-95 transition-all">Empezar a pedir</button>
           </div>
         </div>
       );
@@ -319,25 +318,25 @@
         <div className="pb-32 bg-gray-50 min-h-screen">
           <header className="bg-red-600 text-white p-4 sticky top-0 z-10 shadow-md">
             <div className="flex justify-between items-center mb-3">
-              <h1 className="font-black text-2xl text-yellow-400">BOKALIA</h1>
-              {user ? <button onClick={() => supabase.auth.signOut()} className="text-xs bg-red-800 px-2 py-1 rounded">Salir</button> 
-                    : <button onClick={() => setShowAuthModal(true)} className="text-sm font-bold bg-yellow-400 text-red-900 px-3 py-1 rounded">Entrar</button>}
+              <h1 className="font-black text-2xl text-yellow-400 tracking-tighter">BOKALIA</h1>
+              {user ? <button onClick={() => supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-3 py-1.5 rounded-lg">Cerrar Sesión</button> 
+                    : <button onClick={() => setShowAuthModal(true)} className="text-sm font-bold bg-yellow-400 text-red-900 px-4 py-1.5 rounded-lg">Entrar</button>}
             </div>
-            {/* Navegación de Pestañas */}
             <div className="flex gap-4 border-t border-red-500 pt-3">
               <button className="font-bold text-white border-b-2 border-white pb-1">Mesa {mesaParam}</button>
-              <button onClick={() => setVistaActual('reservas')} className="font-bold text-red-200 hover:text-white pb-1">Reservas</button>
+              <button onClick={() => setVistaActual('reservas')} className="font-bold text-red-200 hover:text-white pb-1">Mis Reservas</button>
             </div>
           </header>
 
-          <UserHeader />
+          <BankingCard />
 
-          {/* Modal para Unirse a la mesa (Tricount style) */}
+          {/* TRICOUNT / MESA OCUPADA */}
           {showJoinPrompt && (
-            <div className="bg-yellow-400 p-4 m-4 rounded-2xl text-red-900 shadow-md border-2 border-yellow-500">
-              <h3 className="font-black mb-1">¡Mesa Ocupada!</h3>
-              <p className="text-sm mb-3">Esta mesa fue abierta por <b>{hostName}</b>. ¿Es tu grupo?</p>
-              <button onClick={() => setShowJoinPrompt(false)} className="w-full bg-white text-red-900 font-bold py-2 rounded-xl">Sí, unirme a esta mesa</button>
+            <div className="bg-yellow-100 p-5 mx-4 mt-2 mb-6 rounded-3xl shadow-sm border-2 border-yellow-400 text-center relative overflow-hidden">
+              <div className="absolute -right-4 -top-4 text-6xl opacity-20">👋</div>
+              <h3 className="font-black text-xl text-yellow-900 mb-1">¡Mesa Ocupada!</h3>
+              <p className="text-sm text-yellow-800 mb-4 font-medium">Esta mesa la abrió <b>{hostName}</b>. ¿Estás en su grupo?</p>
+              <button onClick={() => setShowJoinPrompt(false)} className="w-full bg-yellow-400 text-yellow-900 font-black py-3 rounded-xl shadow-sm hover:bg-yellow-500">Sí, unirme a su cuenta</button>
             </div>
           )}
 
@@ -345,52 +344,58 @@
             
             {/* UPSELLING INTELIGENTE */}
             {ultimoPedido && (
-              <div className="bg-orange-500 p-4 rounded-2xl shadow-lg mb-6 flex items-center justify-between border-2 border-orange-400">
-                <div>
-                  <p className="text-white text-xs font-bold uppercase tracking-wider mb-1">¡Pídelo de nuevo!</p>
-                  <p className="text-white font-black text-lg">{ultimoPedido.nombre}</p>
+              <div className="bg-orange-500 p-1 rounded-3xl shadow-lg mb-8 bg-gradient-to-r from-orange-500 to-red-500">
+                <div className="bg-white/10 rounded-[22px] p-4 flex items-center justify-between">
+                  <div>
+                    <span className="bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest">Pídelo de nuevo</span>
+                    <p className="text-white font-black text-xl mt-1">{ultimoPedido.nombre}</p>
+                  </div>
+                  <button onClick={() => añadirAlCarrito(ultimoPedido)} className="bg-white text-red-600 font-black py-2 px-4 rounded-xl shadow-sm hover:scale-105 transition-transform">
+                    + Añadir
+                  </button>
                 </div>
-                <button onClick={() => añadirAlCarrito(ultimoPedido)} className="bg-yellow-400 text-orange-900 font-black py-2 px-4 rounded-xl shadow-sm hover:scale-105 transition-transform">
-                  + {ultimoPedido.precio}€
-                </button>
               </div>
             )}
 
             <h2 className="text-2xl font-black text-gray-800 mb-4">La Carta</h2>
             
-            {productos.length === 0 && <p className="text-red-500 font-bold">No hay productos. (Comprueba el RLS en Supabase).</p>}
+            {dbError && <div className="bg-red-100 text-red-600 p-4 rounded-xl font-bold mb-4">Error DB: {dbError}</div>}
+            {productos.length === 0 && !dbError && <p className="text-gray-500">Cargando menú...</p>}
             
             <div className="grid grid-cols-2 gap-4 mb-8">
               {productos.map(p => (
-                <div key={p.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 flex flex-col">
-                  <div className="h-32 bg-gray-200"><img src={p.imagen_url} className="w-full h-full object-cover" /></div>
-                  <div className="p-3 flex flex-col flex-grow">
-                    <h3 className="font-bold text-gray-800 text-sm leading-tight">{p.nombre}</h3>
-                    <p className="text-orange-500 font-black mt-1 mb-3">{p.precio}€</p>
-                    <button onClick={() => añadirAlCarrito(p)} className="mt-auto w-full bg-red-50 text-red-600 font-bold py-2 rounded-xl text-sm">Añadir</button>
+                <div key={p.id} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 flex flex-col">
+                  <div className="h-32 bg-gray-200 relative"><img src={p.imagen_url} className="w-full h-full object-cover" /></div>
+                  <div className="p-4 flex flex-col flex-grow">
+                    <h3 className="font-black text-gray-800 text-sm leading-tight">{p.nombre}</h3>
+                    <p className="text-orange-500 font-black mt-1 mb-4 text-lg">{p.precio}€</p>
+                    <button onClick={() => añadirAlCarrito(p)} className="mt-auto w-full bg-red-50 text-red-600 font-black py-3 rounded-xl text-sm hover:bg-red-600 hover:text-white transition-colors">Añadir</button>
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* CESTA GRUPAL (MESA COMPARTIDA) */}
+            {/* CESTA GRUPAL */}
             {rondas.length > 0 && (
               <div className="mb-8">
                 <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-black text-gray-800">Consumo de la mesa</h2>
+                  <h2 className="text-xl font-black text-gray-800 flex items-center gap-2">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    Mesa en directo
+                  </h2>
                   {sesionActiva.estado === 'activa' && (
-                    <button onClick={pedirCuenta} className="bg-gray-800 text-white text-xs font-bold px-3 py-2 rounded-lg">Pedir Cuenta</button>
+                    <button onClick={pedirCuenta} className="bg-gray-800 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-md">Pedir Cuenta</button>
                   )}
                 </div>
                 {rondas.map((ronda, i) => (
-                  <div key={ronda.id} className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-yellow-400 mb-3">
-                    <div className="flex justify-between border-b border-gray-100 pb-2 mb-2">
-                      <p className="font-black text-gray-700">Ronda #{i+1}</p>
-                      <span className="text-xs font-bold text-orange-600 bg-orange-100 px-2 py-1 rounded uppercase">{ronda.estado}</span>
+                  <div key={ronda.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-3">
+                    <div className="flex justify-between items-center border-b border-gray-100 pb-2 mb-2">
+                      <p className="font-black text-gray-400 text-sm uppercase">Ronda #{i+1}</p>
+                      <span className="text-[10px] font-black text-orange-600 bg-orange-100 px-2 py-1 rounded uppercase tracking-widest">{ronda.estado}</span>
                     </div>
-                    <ul className="text-sm text-gray-600 space-y-1">
+                    <ul className="text-sm text-gray-700 space-y-1">
                       {ronda.items?.map(item => (
-                        <li key={item.id}><span className="font-black text-red-500 mr-2">{item.cantidad}x</span>{item.producto?.nombre}</li>
+                        <li key={item.id} className="flex gap-2 font-medium"><span className="font-black text-red-500">{item.cantidad}x</span>{item.producto?.nombre}</li>
                       ))}
                     </ul>
                   </div>
@@ -405,10 +410,10 @@
               <div className="flex justify-between items-center max-w-2xl mx-auto">
                 <div>
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Tu pedido</p>
-                  <p className="text-2xl font-black text-gray-800">{carrito.length} prod.</p>
+                  <p className="text-2xl font-black text-gray-800">{carrito.length} <span className="text-sm font-bold text-gray-500">ítems</span></p>
                 </div>
-                <button onClick={enviarPedido} className="bg-green-500 text-white font-black py-4 px-8 rounded-2xl shadow-xl text-lg flex items-center gap-2">
-                  Enviar a Cocina
+                <button onClick={enviarPedido} className="bg-green-500 hover:bg-green-600 text-white font-black py-4 px-8 rounded-2xl shadow-xl text-lg flex items-center gap-2 transform active:scale-95 transition-all">
+                  Mandar a cocina
                 </button>
               </div>
             </div>
@@ -416,15 +421,16 @@
 
           {/* MODAL AUTH */}
           {showAuthModal && (
-            <div className="fixed inset-0 bg-black/60 z-50 flex justify-center items-center p-4">
-              <div className="bg-white rounded-3xl p-6 w-full max-w-sm relative">
-                <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-gray-400">✕</button>
-                <h3 className="text-2xl font-black mb-4">Inicia sesión</h3>
-                <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-3 p-4 bg-gray-100 rounded-xl outline-none" />
-                <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-4 bg-gray-100 rounded-xl outline-none" />
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+              <div className="bg-white rounded-3xl p-8 w-full max-w-sm relative shadow-2xl">
+                <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-bold text-xl">✕</button>
+                <h3 className="text-3xl font-black mb-1 text-gray-800">Casi listo</h3>
+                <p className="text-gray-500 mb-6 font-medium text-sm">Entra para hacer tu pedido y ganar puntos.</p>
+                <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-3 p-4 bg-gray-100 rounded-xl outline-none font-medium focus:bg-white focus:ring-2 ring-red-500" />
+                <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-4 bg-gray-100 rounded-xl outline-none font-medium focus:bg-white focus:ring-2 ring-red-500" />
                 <div className="flex gap-2">
-                  <button onClick={() => handleLogin(false)} className="flex-1 bg-orange-500 text-white font-bold py-3 rounded-xl">Entrar</button>
-                  <button onClick={() => handleLogin(true)} className="flex-1 bg-yellow-400 text-red-900 font-bold py-3 rounded-xl">Registro</button>
+                  <button onClick={() => handleLogin(false)} className="flex-1 bg-red-600 text-white font-black py-4 rounded-xl">Entrar</button>
+                  <button onClick={() => handleLogin(true)} className="flex-1 bg-yellow-400 text-yellow-900 font-black py-4 rounded-xl">Registro</button>
                 </div>
               </div>
             </div>
