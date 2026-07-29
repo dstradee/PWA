@@ -24,13 +24,20 @@
       'sb_publishable_oIWpn-mNPUZaQPdf7HNU_Q_Lc7R6UOB'
     );
 
+    // Salvavidas de Menú por si Supabase falla
+    const MENU_EMERGENCIA = [
+      { id: '1', nombre: 'Bokata Clásico', precio: 5.50, imagen_url: 'https://images.unsplash.com/photo-1619881589316-56c7f9e6b587?w=500', categoria: 'Bocadillos' },
+      { id: '2', nombre: 'Burger Doble', precio: 8.90, imagen_url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500', categoria: 'Hamburguesas' },
+      { id: '3', nombre: 'Patatas Bravas', precio: 4.50, imagen_url: 'https://images.unsplash.com/photo-1541592106381-b31e9677c0e5?w=500', categoria: 'Entrantes' }
+    ];
+
     function App() {
       const [vistaActual, setVistaActual] = useState('mesa');
       const [mesaParam, setMesaParam] = useState(null);
+      
       const [user, setUser] = useState(null);
       const [userProfile, setUserProfile] = useState(null);
       const [productos, setProductos] = useState([]);
-      const [dbError, setDbError] = useState(null);
       
       const [sesionActiva, setSesionActiva] = useState(null);
       const [hostName, setHostName] = useState('');
@@ -60,7 +67,7 @@
 
         const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
           if(session?.user) procesarUsuario(session.user);
-          else { setUser(null); setUserProfile(null); }
+          else { setUser(null); setUserProfile(null); setUltimoPedido(null); }
         });
 
         return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
@@ -87,10 +94,10 @@
 
       const procesarUsuario = async (authUser) => {
         setUser(authUser);
-        let { data, error } = await supabase.from('usuarios').select('*').eq('id', authUser.id).single();
+        let { data } = await supabase.from('usuarios').select('*').eq('id', authUser.id).single();
         if (!data) {
           const { data: newUser } = await supabase.from('usuarios')
-            .insert([{ id: authUser.id, email: authUser.email, puntos: 50 }]) // 50 pts de regalo
+            .insert([{ id: authUser.id, email: authUser.email, puntos: 50 }])
             .select().single();
           data = newUser;
         }
@@ -101,8 +108,12 @@
 
       const cargarMenu = async () => {
         const { data, error } = await supabase.from('productos').select('*').eq('activo', true);
-        if (error) setDbError(error.message);
-        else setProductos(data || []);
+        if (error || !data || data.length === 0) {
+          console.warn("Usando menú de emergencia. Revisa tu BD.");
+          setProductos(MENU_EMERGENCIA);
+        } else {
+          setProductos(data);
+        }
       };
 
       const buscarUltimoPedido = async (userId) => {
@@ -112,7 +123,7 @@
         if (ultimasRondas && ultimasRondas.length > 0) {
           const { data: items } = await supabase.from('items_pedido')
             .select('producto_id, producto:productos(*)').eq('ronda_id', ultimasRondas[0].id).limit(1);
-          if (items && items.length > 0) setUltimoPedido(items[0].producto);
+          if (items && items.length > 0 && items[0].producto) setUltimoPedido(items[0].producto);
         }
       };
 
@@ -138,11 +149,15 @@
       };
 
       const handleLogin = async (esRegistro) => {
-        const { error } = esRegistro
+        const { data, error } = esRegistro
           ? await supabase.auth.signUp({ email, password })
           : await supabase.auth.signInWithPassword({ email, password });
-        if (error) alert(error.message);
-        else setShowAuthModal(false);
+          
+        if (error) {
+          alert("Error: " + error.message + " (Recuerda desactivar 'Confirm Email' en Supabase)");
+        } else {
+          setShowAuthModal(false);
+        }
       };
 
       const añadirAlCarrito = (producto) => {
@@ -167,12 +182,25 @@
         if (ronda) {
           const conteo = {};
           carrito.forEach(p => { conteo[p.id] = (conteo[p.id] || 0) + 1; });
-          const itemsInsert = Object.keys(conteo).map(id => ({
-            ronda_id: ronda.id, producto_id: id, cantidad: conteo[id], precio_unitario: carrito.find(p => p.id === id).precio
-          }));
-          await supabase.from('items_pedido').insert(itemsInsert);
           
-          // Ganar 20 puntos por cada euro gastado (Para que se vea más rápido)
+          const itemsInsert = [];
+          for(let id in conteo) {
+            // Usamos el ID original del producto, no el fallback temporal si falla
+            let prodIdDb = id;
+            if(id.length < 5) prodIdDb = null; // Protección si usan el menu fallback
+            
+            if(prodIdDb) {
+              itemsInsert.push({
+                ronda_id: ronda.id, producto_id: prodIdDb, cantidad: conteo[id], precio_unitario: carrito.find(p => p.id === id).precio
+              });
+            }
+          }
+          
+          if(itemsInsert.length > 0) {
+            await supabase.from('items_pedido').insert(itemsInsert);
+          }
+          
+          // Ganar puntos (Gamificación)
           const totalGastado = carrito.reduce((sum, p) => sum + p.precio, 0);
           const puntosGanados = Math.floor(totalGastado * 20); 
           await supabase.from('usuarios').update({ puntos: (userProfile?.puntos || 0) + puntosGanados }).eq('id', user.id);
@@ -180,6 +208,7 @@
           
           setCarrito([]);
           cargarRondasMesa(idDeSesion);
+          alert("¡Pedido enviado a cocina!");
         }
       };
 
@@ -192,57 +221,68 @@
         }, 5000); 
       };
 
-      // --- COMPONENTE: TARJETA DE BANCO (FIDELIZACIÓN) ---
+      // --- TARJETA DE BANCO (FIDELIZACIÓN) ---
       const BankingCard = () => {
-        if (!userProfile) return null;
+        // SI NO ESTÁ LOGUEADO, MOSTRAMOS UN TEASER (PARA QUE VEAS QUE EXISTE)
+        if (!userProfile) {
+          return (
+            <div className="m-4 relative overflow-hidden rounded-3xl p-6 shadow-xl bg-gradient-to-br from-gray-700 to-gray-900 text-white cursor-pointer" onClick={() => setShowAuthModal(true)}>
+               <div className="absolute inset-0 backdrop-blur-sm bg-black/30 z-10 flex flex-col items-center justify-center text-center p-4">
+                  <h3 className="font-black text-xl text-yellow-400 mb-1">Bokalia Wallet</h3>
+                  <p className="text-xs font-medium text-white/80">Inicia sesión para ganar puntos, subir de nivel VIP y conseguir comida gratis.</p>
+                  <button className="mt-3 bg-red-600 px-6 py-2 rounded-full font-bold text-sm">Activar Wallet</button>
+               </div>
+               {/* Fondo borroso para dar el efecto de App de Banco */}
+               <div className="opacity-20 blur-sm pointer-events-none">
+                  <p className="text-white/70 text-xs font-bold uppercase tracking-widest mb-1">Bokalia Wallet</p>
+                  <p className="text-3xl font-black mb-4">0 <span className="text-lg font-medium opacity-80">pts</span></p>
+                  <div className="h-2 w-full bg-white/20 rounded-full"></div>
+               </div>
+            </div>
+          );
+        }
         
+        // SI ESTÁ LOGUEADO, MOSTRAMOS LA TARJETA REAL
         const pts = userProfile.puntos || 0;
-        const meta = 1500; // Meta para la burger gratis
+        const meta = 1500; 
         const progreso = Math.min((pts / meta) * 100, 100);
         
-        let vipLvl = "BRONCE"; let gradiente = "from-gray-800 to-gray-900";
+        let vipLvl = "BRONCE"; let gradiente = "from-gray-800 to-gray-900"; let brillo = "bg-white";
         if (pts > 500) { vipLvl = "PLATA"; gradiente = "from-gray-400 to-gray-600"; }
-        if (pts > 1500) { vipLvl = "ORO"; gradiente = "from-yellow-400 to-yellow-600"; }
+        if (pts > 1500) { vipLvl = "ORO"; gradiente = "from-yellow-400 to-yellow-600"; brillo = "bg-yellow-200"; }
 
         return (
           <div className="m-4">
-            <div className={`relative overflow-hidden rounded-3xl p-6 shadow-xl bg-gradient-to-br ${gradiente} text-white`}>
-              {/* Círculos decorativos de fondo */}
-              <div className="absolute -right-6 -top-6 w-32 h-32 rounded-full bg-white opacity-10"></div>
-              <div className="absolute -left-6 -bottom-6 w-24 h-24 rounded-full bg-white opacity-10"></div>
+            <div className={`relative overflow-hidden rounded-3xl p-6 shadow-2xl bg-gradient-to-br ${gradiente} text-white`}>
+              <div className={`absolute -right-6 -top-6 w-32 h-32 rounded-full ${brillo} opacity-10`}></div>
+              <div className={`absolute -left-6 -bottom-6 w-24 h-24 rounded-full ${brillo} opacity-10`}></div>
               
               <div className="relative z-10 flex justify-between items-start mb-6">
                 <div>
-                  <p className="text-white/70 text-xs font-bold uppercase tracking-widest mb-1">Bokalia Wallet</p>
-                  <p className="text-3xl font-black">{pts.toLocaleString()} <span className="text-lg font-medium opacity-80">pts</span></p>
+                  <p className="text-white/70 text-[10px] font-bold uppercase tracking-widest mb-1">Bokalia Wallet</p>
+                  <p className="text-4xl font-black tracking-tighter">{pts.toLocaleString()} <span className="text-lg font-medium opacity-80 tracking-normal">pts</span></p>
                 </div>
-                <div className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest border border-white/30">
+                <div className="bg-white/20 backdrop-blur-sm px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border border-white/30 shadow-sm">
                   {vipLvl}
                 </div>
               </div>
 
               <div className="relative z-10">
                 <div className="flex justify-between text-xs font-bold text-white/80 mb-2">
-                  <span>Meta: Burger Gratis</span>
+                  <span>Próximo Goal: Burger Gratis</span>
                   <span>{pts} / {meta}</span>
                 </div>
-                <div className="h-2 w-full bg-black/30 rounded-full overflow-hidden">
+                <div className="h-3 w-full bg-black/30 rounded-full overflow-hidden shadow-inner">
                   <div className="h-full bg-white rounded-full transition-all duration-1000 ease-out" style={{ width: `${progreso}%` }}></div>
                 </div>
-                {pts < meta ? (
-                  <p className="text-[10px] text-white/60 mt-2 font-medium">Te faltan {meta - pts} pts. ¡Pide ahora para sumar!</p>
-                ) : (
-                  <p className="text-[10px] text-green-300 mt-2 font-bold uppercase">¡Has desbloqueado tu premio!</p>
-                )}
               </div>
             </div>
           </div>
         );
       };
 
-      // --- VISTAS MENORES ---
+      // --- MODAL DE RESEÑAS ---
       const ReviewModal = () => {
-        // [El modal de reseñas se mantiene igual]
         const [rating, setRating] = useState(0);
         const [msg, setMsg] = useState('');
         const [submitted, setSubmitted] = useState(false);
@@ -263,19 +303,19 @@
           <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-3xl p-6 w-full max-w-sm text-center">
               {submitted ? (
-                <div><h3 className="text-2xl font-black text-green-500 mb-2">¡Gracias!</h3><p className="text-gray-600">Tomaremos nota.</p></div>
+                <div><h3 className="text-2xl font-black text-green-500 mb-2">¡Gracias!</h3><p className="text-gray-600 font-medium">Hemos guardado tu reseña secreta.</p></div>
               ) : (
                 <div>
                   <h3 className="text-2xl font-black text-gray-800 mb-2">¿Qué tal tu comida?</h3>
-                  <p className="text-sm text-gray-500 mb-6">Valora tu experiencia</p>
+                  <p className="text-sm text-gray-500 mb-6 font-medium">Valora tu experiencia</p>
                   <div className="flex justify-center gap-2 mb-6">
                     {[1,2,3,4,5].map(star => (
                       <button key={star} onClick={() => setRating(star)} className={`text-5xl ${rating >= star ? 'text-yellow-400' : 'text-gray-200'} transition-colors`}>★</button>
                     ))}
                   </div>
-                  {rating > 0 && rating <= 3 && <textarea placeholder="¿Qué podemos mejorar?" value={msg} onChange={e => setMsg(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-sm mb-4 h-24 outline-none"/>}
-                  {rating > 0 && <button onClick={handleReview} className="w-full bg-red-600 text-white font-black py-4 rounded-xl">{rating >= 4 ? "¡Déjanos 5 estrellas en Google!" : "Enviar mensaje"}</button>}
-                  <button onClick={() => setShowReviewModal(false)} className="mt-4 text-xs font-bold text-gray-400">Cerrar</button>
+                  {rating > 0 && rating <= 3 && <textarea placeholder="¿Qué podemos mejorar?" value={msg} onChange={e => setMsg(e.target.value)} className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm mb-4 h-24 outline-none font-medium"/>}
+                  {rating > 0 && <button onClick={handleReview} className="w-full bg-red-600 hover:bg-red-700 text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95">{rating >= 4 ? "¡Déjanos 5 estrellas en Google!" : "Enviar Feedback"}</button>}
+                  <button onClick={() => setShowReviewModal(false)} className="mt-6 text-sm font-bold text-gray-400">Saltar</button>
                 </div>
               )}
             </div>
@@ -283,48 +323,49 @@
         );
       };
 
+      // --- VISTA RESERVAS ---
       if (vistaActual === 'reservas') {
         return (
           <div className="min-h-screen bg-gray-50">
-            <header className="bg-red-600 text-white p-4 flex gap-4">
-              <button onClick={() => setVistaActual('mesa')} className="font-bold text-red-200 hover:text-white">← Volver</button>
-              <h1 className="font-black text-yellow-400">BOKALIA RESERVAS</h1>
+            <header className="bg-red-600 text-white p-4 flex gap-4 items-center">
+              <button onClick={() => setVistaActual('mesa')} className="font-bold bg-red-800 px-3 py-1 rounded-lg">← Volver</button>
+              <h1 className="font-black text-xl text-yellow-400">BOKALIA RESERVAS</h1>
             </header>
-            <div className="p-8 text-center mt-12">
-              <div className="text-5xl mb-4">📅</div>
-              <h2 className="text-2xl font-black text-gray-800 mb-2">Reservas en construcción</h2>
-              <p className="text-gray-500">Pronto disponible.</p>
+            <div className="p-8 text-center mt-20">
+              <div className="text-6xl mb-6">📅</div>
+              <h2 className="text-3xl font-black text-gray-800 mb-4">Próximamente</h2>
+              <p className="text-gray-500 font-medium text-lg">Estamos preparando el mejor sistema para que reserves tu mesa favorita.</p>
             </div>
           </div>
         );
       }
 
-      // --- VISTA PRINCIPAL (MESA) ---
-
-      if (loading) return <div className="h-screen flex items-center justify-center font-black text-red-600 text-2xl animate-pulse">BOKALIA</div>;
+      // --- PANTALLA INICIAL (ELEGIR MESA) ---
+      if (loading) return <div className="h-screen flex items-center justify-center bg-yellow-50 font-black text-red-600 text-3xl animate-pulse tracking-tighter">BOKALIA</div>;
 
       if (!mesaParam) return (
         <div className="min-h-screen bg-yellow-50 flex flex-col justify-center items-center p-6 text-center">
-          <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md border-2 border-red-100">
-            <h1 className="text-5xl font-black text-red-600 mb-6 tracking-tighter">BOKALIA</h1>
-            <p className="text-gray-500 mb-6 font-bold">Introduce el número de tu mesa:</p>
-            <input type="number" id="inputMesa" className="text-center text-5xl font-black w-full p-4 rounded-2xl bg-gray-50 border-4 border-gray-200 mb-6 outline-none focus:border-red-500 transition-colors" placeholder="0" />
-            <button onClick={() => window.location.search = `?mesa=${document.getElementById('inputMesa').value}`} className="w-full bg-red-600 hover:bg-red-700 text-white font-black py-4 rounded-2xl text-xl shadow-lg transform active:scale-95 transition-all">Empezar a pedir</button>
+          <div className="bg-white p-8 rounded-[2rem] shadow-2xl w-full max-w-md border-2 border-red-100">
+            <h1 className="text-5xl font-black text-red-600 mb-2 tracking-tighter">BOKALIA</h1>
+            <p className="text-gray-500 mb-8 font-bold text-lg">¿En qué mesa te sientas?</p>
+            <input type="number" id="inputMesa" className="text-center text-6xl font-black w-full p-4 rounded-2xl bg-gray-50 border-4 border-gray-200 mb-6 outline-none focus:border-red-500 transition-colors" placeholder="0" />
+            <button onClick={() => window.location.search = `?mesa=${document.getElementById('inputMesa').value}`} className="w-full bg-red-600 hover:bg-red-700 text-white font-black py-5 rounded-2xl text-2xl shadow-lg transform active:scale-95 transition-all">Entrar al menú</button>
           </div>
         </div>
       );
 
+      // --- VISTA PRINCIPAL (MENÚ Y MESA) ---
       return (
         <div className="pb-32 bg-gray-50 min-h-screen">
-          <header className="bg-red-600 text-white p-4 sticky top-0 z-10 shadow-md">
+          <header className="bg-red-600 text-white p-4 sticky top-0 z-30 shadow-md">
             <div className="flex justify-between items-center mb-3">
               <h1 className="font-black text-2xl text-yellow-400 tracking-tighter">BOKALIA</h1>
               {user ? <button onClick={() => supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-3 py-1.5 rounded-lg">Cerrar Sesión</button> 
-                    : <button onClick={() => setShowAuthModal(true)} className="text-sm font-bold bg-yellow-400 text-red-900 px-4 py-1.5 rounded-lg">Entrar</button>}
+                    : <button onClick={() => setShowAuthModal(true)} className="text-sm font-bold bg-yellow-400 text-red-900 px-4 py-1.5 rounded-lg shadow-sm">Entrar</button>}
             </div>
             <div className="flex gap-4 border-t border-red-500 pt-3">
-              <button className="font-bold text-white border-b-2 border-white pb-1">Mesa {mesaParam}</button>
-              <button onClick={() => setVistaActual('reservas')} className="font-bold text-red-200 hover:text-white pb-1">Mis Reservas</button>
+              <button className="font-bold text-white border-b-2 border-white pb-1 px-2">Mesa {mesaParam}</button>
+              <button onClick={() => setVistaActual('reservas')} className="font-bold text-red-200 hover:text-white pb-1 px-2">Mis Reservas</button>
             </div>
           </header>
 
@@ -332,11 +373,10 @@
 
           {/* TRICOUNT / MESA OCUPADA */}
           {showJoinPrompt && (
-            <div className="bg-yellow-100 p-5 mx-4 mt-2 mb-6 rounded-3xl shadow-sm border-2 border-yellow-400 text-center relative overflow-hidden">
-              <div className="absolute -right-4 -top-4 text-6xl opacity-20">👋</div>
-              <h3 className="font-black text-xl text-yellow-900 mb-1">¡Mesa Ocupada!</h3>
-              <p className="text-sm text-yellow-800 mb-4 font-medium">Esta mesa la abrió <b>{hostName}</b>. ¿Estás en su grupo?</p>
-              <button onClick={() => setShowJoinPrompt(false)} className="w-full bg-yellow-400 text-yellow-900 font-black py-3 rounded-xl shadow-sm hover:bg-yellow-500">Sí, unirme a su cuenta</button>
+            <div className="bg-yellow-400 p-5 mx-4 mt-2 mb-6 rounded-3xl shadow-lg text-center relative overflow-hidden">
+              <h3 className="font-black text-2xl text-red-900 mb-1 tracking-tight">¡Mesa Ocupada!</h3>
+              <p className="text-sm text-red-800 mb-4 font-bold">Abierta por <b>{hostName}</b>. ¿Es tu grupo?</p>
+              <button onClick={() => setShowJoinPrompt(false)} className="w-full bg-white text-red-900 font-black py-4 rounded-2xl shadow-sm hover:scale-105 transition-transform text-lg">Sí, unirme a su cuenta</button>
             </div>
           )}
 
@@ -344,31 +384,28 @@
             
             {/* UPSELLING INTELIGENTE */}
             {ultimoPedido && (
-              <div className="bg-orange-500 p-1 rounded-3xl shadow-lg mb-8 bg-gradient-to-r from-orange-500 to-red-500">
-                <div className="bg-white/10 rounded-[22px] p-4 flex items-center justify-between">
+              <div className="bg-gradient-to-r from-orange-500 to-red-500 p-1.5 rounded-[2rem] shadow-xl mb-8">
+                <div className="bg-white/10 backdrop-blur-sm rounded-[1.7rem] p-5 flex items-center justify-between border border-white/20">
                   <div>
-                    <span className="bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest">Pídelo de nuevo</span>
-                    <p className="text-white font-black text-xl mt-1">{ultimoPedido.nombre}</p>
+                    <span className="bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest shadow-sm">¡Pídelo de nuevo!</span>
+                    <p className="text-white font-black text-2xl mt-2 tracking-tight">{ultimoPedido.nombre}</p>
                   </div>
-                  <button onClick={() => añadirAlCarrito(ultimoPedido)} className="bg-white text-red-600 font-black py-2 px-4 rounded-xl shadow-sm hover:scale-105 transition-transform">
+                  <button onClick={() => añadirAlCarrito(ultimoPedido)} className="bg-white text-red-600 font-black py-3 px-5 rounded-2xl shadow-lg hover:scale-105 transition-transform active:scale-95 text-lg">
                     + Añadir
                   </button>
                 </div>
               </div>
             )}
 
-            <h2 className="text-2xl font-black text-gray-800 mb-4">La Carta</h2>
-            
-            {dbError && <div className="bg-red-100 text-red-600 p-4 rounded-xl font-bold mb-4">Error DB: {dbError}</div>}
-            {productos.length === 0 && !dbError && <p className="text-gray-500">Cargando menú...</p>}
+            <h2 className="text-2xl font-black text-gray-800 mb-4 ml-2 tracking-tight">La Carta</h2>
             
             <div className="grid grid-cols-2 gap-4 mb-8">
               {productos.map(p => (
-                <div key={p.id} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 flex flex-col">
-                  <div className="h-32 bg-gray-200 relative"><img src={p.imagen_url} className="w-full h-full object-cover" /></div>
+                <div key={p.id} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 flex flex-col hover:shadow-md transition-shadow">
+                  <div className="h-36 bg-gray-200 relative"><img src={p.imagen_url} className="w-full h-full object-cover" /></div>
                   <div className="p-4 flex flex-col flex-grow">
                     <h3 className="font-black text-gray-800 text-sm leading-tight">{p.nombre}</h3>
-                    <p className="text-orange-500 font-black mt-1 mb-4 text-lg">{p.precio}€</p>
+                    <p className="text-orange-500 font-black mt-1 mb-4 text-xl">{p.precio}€</p>
                     <button onClick={() => añadirAlCarrito(p)} className="mt-auto w-full bg-red-50 text-red-600 font-black py-3 rounded-xl text-sm hover:bg-red-600 hover:text-white transition-colors">Añadir</button>
                   </div>
                 </div>
@@ -378,24 +415,24 @@
             {/* CESTA GRUPAL */}
             {rondas.length > 0 && (
               <div className="mb-8">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-xl font-black text-gray-800 flex items-center gap-2">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <div className="flex justify-between items-center mb-4 ml-2">
+                  <h2 className="text-xl font-black text-gray-800 flex items-center gap-2 tracking-tight">
+                    <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]"></div>
                     Mesa en directo
                   </h2>
                   {sesionActiva.estado === 'activa' && (
-                    <button onClick={pedirCuenta} className="bg-gray-800 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-md">Pedir Cuenta</button>
+                    <button onClick={pedirCuenta} className="bg-gray-800 text-white text-sm font-black px-4 py-2.5 rounded-xl shadow-lg hover:bg-black transition-colors">Pedir Cuenta</button>
                   )}
                 </div>
                 {rondas.map((ronda, i) => (
-                  <div key={ronda.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-3">
-                    <div className="flex justify-between items-center border-b border-gray-100 pb-2 mb-2">
-                      <p className="font-black text-gray-400 text-sm uppercase">Ronda #{i+1}</p>
+                  <div key={ronda.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 mb-3">
+                    <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-3">
+                      <p className="font-black text-gray-400 text-sm uppercase tracking-wider">Ronda #{i+1}</p>
                       <span className="text-[10px] font-black text-orange-600 bg-orange-100 px-2 py-1 rounded uppercase tracking-widest">{ronda.estado}</span>
                     </div>
-                    <ul className="text-sm text-gray-700 space-y-1">
+                    <ul className="text-sm text-gray-700 space-y-2">
                       {ronda.items?.map(item => (
-                        <li key={item.id} className="flex gap-2 font-medium"><span className="font-black text-red-500">{item.cantidad}x</span>{item.producto?.nombre}</li>
+                        <li key={item.id} className="flex gap-3 font-bold text-base items-center"><span className="bg-red-100 text-red-600 w-8 h-8 flex items-center justify-center rounded-lg">{item.cantidad}x</span>{item.producto?.nombre}</li>
                       ))}
                     </ul>
                   </div>
@@ -409,10 +446,10 @@
             <div className="fixed bottom-0 left-0 w-full bg-white p-4 shadow-[0_-15px_30px_-5px_rgba(0,0,0,0.15)] z-20">
               <div className="flex justify-between items-center max-w-2xl mx-auto">
                 <div>
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Tu pedido</p>
-                  <p className="text-2xl font-black text-gray-800">{carrito.length} <span className="text-sm font-bold text-gray-500">ítems</span></p>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Tu pedido</p>
+                  <p className="text-3xl font-black text-gray-800 tracking-tighter">{carrito.length} <span className="text-base font-bold text-gray-500 tracking-normal">ítems</span></p>
                 </div>
-                <button onClick={enviarPedido} className="bg-green-500 hover:bg-green-600 text-white font-black py-4 px-8 rounded-2xl shadow-xl text-lg flex items-center gap-2 transform active:scale-95 transition-all">
+                <button onClick={enviarPedido} className="bg-green-500 hover:bg-green-600 text-white font-black py-4 px-8 rounded-2xl shadow-[0_8px_20px_rgba(34,197,94,0.4)] text-xl flex items-center gap-2 transform active:scale-95 transition-all">
                   Mandar a cocina
                 </button>
               </div>
@@ -422,15 +459,15 @@
           {/* MODAL AUTH */}
           {showAuthModal && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-              <div className="bg-white rounded-3xl p-8 w-full max-w-sm relative shadow-2xl">
-                <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-bold text-xl">✕</button>
-                <h3 className="text-3xl font-black mb-1 text-gray-800">Casi listo</h3>
-                <p className="text-gray-500 mb-6 font-medium text-sm">Entra para hacer tu pedido y ganar puntos.</p>
-                <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-3 p-4 bg-gray-100 rounded-xl outline-none font-medium focus:bg-white focus:ring-2 ring-red-500" />
-                <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-4 bg-gray-100 rounded-xl outline-none font-medium focus:bg-white focus:ring-2 ring-red-500" />
-                <div className="flex gap-2">
-                  <button onClick={() => handleLogin(false)} className="flex-1 bg-red-600 text-white font-black py-4 rounded-xl">Entrar</button>
-                  <button onClick={() => handleLogin(true)} className="flex-1 bg-yellow-400 text-yellow-900 font-black py-4 rounded-xl">Registro</button>
+              <div className="bg-white rounded-[2rem] p-8 w-full max-w-sm relative shadow-2xl">
+                <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-black text-2xl hover:text-gray-800">✕</button>
+                <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">¡Hola!</h3>
+                <p className="text-gray-500 mb-8 font-medium text-sm">Entra para hacer tu pedido, ganar puntos y subir tu nivel VIP.</p>
+                <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-3 p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:bg-white focus:border-red-500 transition-colors" />
+                <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:bg-white focus:border-red-500 transition-colors" />
+                <div className="flex flex-col gap-3">
+                  <button onClick={() => handleLogin(false)} className="w-full bg-red-600 hover:bg-red-700 text-white font-black py-4 rounded-2xl shadow-lg text-lg transition-all active:scale-95">Entrar</button>
+                  <button onClick={() => handleLogin(true)} className="w-full bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-black py-4 rounded-2xl shadow-md text-lg transition-all active:scale-95">Registrarme</button>
                 </div>
               </div>
             </div>
