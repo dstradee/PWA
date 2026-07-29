@@ -6,21 +6,20 @@
   <meta name="theme-color" content="#dc2626">
   <title>Bokalia - Pide desde tu mesa</title>
   
-  <!-- Tailwind CSS para los estilos Fast Food -->
+  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   
-  <!-- React & ReactDOM (Lógica) -->
+  <!-- React & ReactDOM -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   
-  <!-- Babel (Para poder escribir código moderno JSX en el propio HTML) -->
+  <!-- Babel -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
   <!-- Supabase JS -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
-    /* Ocultar barra de scroll para que parezca una app nativa */
     ::-webkit-scrollbar { display: none; }
     body { -ms-overflow-style: none; scrollbar-width: none; font-family: system-ui, -apple-system, sans-serif; }
   </style>
@@ -28,17 +27,15 @@
 <body class="bg-gray-50 text-gray-900">
   <div id="root"></div>
 
-  <!-- AQUI EMPIEZA LA MAGIA DE REACT EN UN SOLO ARCHIVO -->
-  <script type="text/babel">
+  <!-- Bucle principal de React -->
+  <script type="text/babel" data-presets="react,env">
     const { useState, useEffect } = React;
 
     // ==========================================
-    // 1. CONFIGURACIÓN DE SUPABASE
+    // 1. CONFIGURACIÓN DE SUPABASE (CON TUS CLAVES)
     // ==========================================
-    // TODO: RELLENA ESTO CUANDO TENGAS LAS CREDENCIALES
-    const SUPABASE_URL = 'PON_AQUI_TU_SUPABASE_URL';
-    const SUPABASE_ANON_KEY = 'PON_AQUI_TU_SUPABASE_ANON_KEY';
-    
+    const SUPABASE_URL = 'https://bswlriuzeintgjioywtz.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_oIWpn-mNPUZaQPdf7HNU_Q_Lc7R6UOB';
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // ==========================================
@@ -51,11 +48,15 @@
 
       const handleAuth = async (isSignUp) => {
         setLoading(true);
-        const { error } = isSignUp 
-          ? await supabase.auth.signUp({ email, password })
-          : await supabase.auth.signInWithPassword({ email, password });
-          
-        if (error) alert(error.message);
+        try {
+          const { error } = isSignUp 
+            ? await supabase.auth.signUp({ email, password })
+            : await supabase.auth.signInWithPassword({ email, password });
+            
+          if (error) alert("Error: " + error.message);
+        } catch (err) {
+          alert("Error de conexión");
+        }
         setLoading(false);
       };
 
@@ -116,7 +117,7 @@
       useEffect(() => {
         if (!sesion) return;
 
-        // Escuchar cambios en tiempo real
+        // Escuchar cambios en tiempo real a prueba de fallos
         const canal = supabase.channel(`mesa_${sesion.id}`)
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pedidos_rondas', filter: `sesion_id=eq.${sesion.id}` }, () => {
             cargarRondasMesa(sesion.id);
@@ -124,21 +125,26 @@
           .subscribe();
 
         cargarRondasMesa(sesion.id);
-        return () => supabase.removeChannel(canal);
+        
+        return () => {
+          supabase.removeChannel(canal);
+        };
       }, [sesion]);
 
       const cargarProductos = async () => {
-        const { data } = await supabase.from('productos').select('*');
+        const { data, error } = await supabase.from('productos').select('*');
+        if (error) console.error("Error al cargar productos:", error);
         if (data) setProductos(data);
       };
 
       const verificarSesionMesa = async () => {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('sesiones_mesa')
           .select('*')
           .eq('num_mesa', numMesa)
           .eq('estado', 'activa')
-          .single();
+          .maybeSingle(); // Usamos maybeSingle para que no dé error si no hay sesión
+          
         if (data) setSesion(data);
       };
 
@@ -147,15 +153,20 @@
           .from('sesiones_mesa')
           .insert([{ num_mesa: numMesa, host_id: user.id, estado: 'activa' }])
           .select().single();
+          
+        if (error) {
+          alert("Error al abrir la mesa. Revisa que ejecutaste el SQL y que las Políticas de Seguridad (RLS) están desactivadas temporalmente.");
+          console.error(error);
+        }
         if (data) setSesion(data);
-        else alert("Error al abrir mesa. ¿Ejecutaste el SQL de las tablas?");
       };
 
       const cargarRondasMesa = async (sesionId) => {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('pedidos_rondas')
           .select('*, items:items_pedido(*, producto:productos(nombre))')
           .eq('sesion_id', sesionId);
+          
         if (data) setRondasMesa(data);
       };
 
@@ -166,10 +177,15 @@
       const enviarRondaACocina = async () => {
         if (miCarrito.length === 0 || !sesion) return;
         
-        const { data: ronda } = await supabase
+        const { data: ronda, error: rondaError } = await supabase
           .from('pedidos_rondas')
           .insert([{ sesion_id: sesion.id, usuario_id: user.id }])
           .select().single();
+
+        if (rondaError) {
+          alert("No se pudo crear el pedido.");
+          return;
+        }
 
         if (ronda) {
           const map = miCarrito.reduce((acc, p) => {
@@ -184,9 +200,13 @@
             precio_unitario: miCarrito.find(p => p.id === prodId).precio
           }));
 
-          await supabase.from('items_pedido').insert(items);
-          setMiCarrito([]);
-          cargarRondasMesa(sesion.id);
+          const { error: itemsError } = await supabase.from('items_pedido').insert(items);
+          if (!itemsError) {
+            setMiCarrito([]);
+            cargarRondasMesa(sesion.id);
+          } else {
+            alert("Error al añadir los items al pedido");
+          }
         }
       };
 
@@ -198,13 +218,13 @@
       if (!sesion) {
         return (
           <div className="min-h-screen bg-yellow-50 flex flex-col items-center justify-center p-6 text-center">
-            <div className="w-24 h-24 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-6">
-              <span className="text-4xl font-black">{numMesa}</span>
+            <div className="w-24 h-24 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-6 shadow-sm">
+              <span className="text-5xl font-black">{numMesa}</span>
             </div>
             <h2 className="text-3xl font-black text-gray-800 mb-2">Mesa libre</h2>
             <p className="text-gray-500 mb-8">Nadie ha abierto esta mesa todavía.</p>
-            <button onClick={crearSesionMesa} className="bg-red-600 text-white font-black py-4 px-8 rounded-full shadow-xl hover:bg-red-700 w-full max-w-sm text-lg">
-              Abrir Mesa y Empezar a Pedir
+            <button onClick={crearSesionMesa} className="bg-red-600 text-white font-black py-4 px-8 rounded-full shadow-xl hover:bg-red-700 w-full max-w-sm text-lg transform hover:scale-105 transition-all">
+              Abrir Mesa y Empezar
             </button>
           </div>
         );
@@ -227,7 +247,7 @@
             <h2 className="text-2xl font-black text-gray-800 mb-4 border-b-2 border-red-200 pb-2">Menú Principal</h2>
             
             <div className="grid grid-cols-2 gap-4 mb-8">
-              {productos.length === 0 ? <p className="text-gray-500 text-sm col-span-2">No hay productos en la BD.</p> : null}
+              {productos.length === 0 ? <p className="text-gray-500 text-sm col-span-2 bg-gray-100 p-4 rounded-xl text-center">Todavía no hay productos en la base de datos.</p> : null}
               {productos.map(p => (
                 <div key={p.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
                   <div className="h-24 bg-gray-200 w-full flex items-center justify-center text-gray-400 text-xs">
@@ -255,9 +275,9 @@
                 <div className="space-y-4">
                   {rondasMesa.map((ronda, i) => (
                     <div key={ronda.id} className="bg-orange-50 p-3 rounded-xl">
-                      <p className="font-black text-orange-800 text-sm mb-2 flex justify-between">
+                      <p className="font-black text-orange-800 text-sm mb-2 flex justify-between items-center">
                         Ronda #{i+1} 
-                        <span className="bg-orange-200 text-orange-900 px-2 py-1 rounded text-xs">{ronda.estado}</span>
+                        <span className="bg-orange-200 text-orange-900 px-2 py-1 rounded text-xs uppercase">{ronda.estado}</span>
                       </p>
                       <ul className="text-sm text-gray-700 space-y-1">
                         {ronda.items?.map((item) => (
@@ -302,63 +322,95 @@
       const [user, setUser] = useState(null);
       const [mesaParam, setMesaParam] = useState(null);
       const [loading, setLoading] = useState(true);
+      const [appError, setAppError] = useState(null);
 
       useEffect(() => {
-        // Obtenemos si ha escaneado un QR simulado en la URL (ej: misitio.com/?mesa=4)
-        const params = new URLSearchParams(window.location.search);
-        const mesa = params.get('mesa');
-        if (mesa) setMesaParam(parseInt(mesa));
+        try {
+          // Detectar número de mesa en la URL
+          const params = new URLSearchParams(window.location.search);
+          const mesa = params.get('mesa');
+          if (mesa) setMesaParam(parseInt(mesa));
 
-        // Verificamos si ya hay un usuario logueado
-        supabase.auth.getSession().then(({ data: { session } }) => {
-          setUser(session?.user || null);
+          // Cargar sesión inicial a prueba de nulos
+          supabase.auth.getSession().then(({ data, error }) => {
+            if (error) console.error("Error de Auth:", error);
+            setUser(data?.session?.user || null);
+            setLoading(false);
+          }).catch(err => {
+            console.error(err);
+            setAppError("Hubo un problema al conectar con Supabase. Revisa la consola.");
+            setLoading(false);
+          });
+
+          // Escuchar cambios (login/logout) de forma segura
+          const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+            setUser(session?.user || null);
+          });
+
+          return () => {
+            if (authListener?.subscription) {
+              authListener.subscription.unsubscribe();
+            }
+          };
+        } catch (e) {
+          setAppError("Error crítico al iniciar la app: " + e.message);
           setLoading(false);
-        });
-
-        // Escuchamos si entra o sale
-        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-          setUser(session?.user || null);
-        });
-
-        return () => authListener.subscription.unsubscribe();
+        }
       }, []);
 
-      if (loading) return <div className="min-h-screen flex items-center justify-center bg-yellow-50 font-bold text-red-600">Cargando Bokalia...</div>;
+      // Si hay un error bloqueante, lo mostramos en lugar de pantalla en blanco
+      if (appError) return (
+        <div className="min-h-screen flex items-center justify-center p-6 text-center flex-col bg-red-50 text-red-600">
+          <h1 className="text-2xl font-black mb-2">Ups, algo salió mal</h1>
+          <p>{appError}</p>
+        </div>
+      );
+
+      // Pantalla de carga
+      if (loading) return (
+        <div className="min-h-screen flex items-center justify-center bg-yellow-50 font-black text-2xl text-red-600 animate-pulse">
+          Cargando Bokalia...
+        </div>
+      );
       
-      // Si no hay usuario, mostramos el login
+      // Pantalla de Auth si no hay usuario
       if (!user) return <Auth />;
 
-      // Si no ha escaneado una mesa, le pedimos el número
+      // Pantalla de pedir el número de mesa si no está en la URL
       if (!mesaParam) {
         return (
           <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-yellow-50 text-center">
             <h1 className="text-4xl font-black text-red-600 mb-4">¡Hola!</h1>
-            <p className="text-gray-600 mb-8">¿En qué mesa te has sentado?</p>
+            <p className="text-gray-600 mb-8 font-medium">¿En qué mesa te has sentado?</p>
             <input 
               type="number" id="numMesaInput" placeholder="Ej: 4" 
-              className="text-center text-3xl font-black w-32 py-4 rounded-2xl border-4 border-red-200 focus:border-red-600 outline-none mb-6"
+              className="text-center text-3xl font-black w-32 py-4 rounded-2xl border-4 border-red-200 focus:border-red-600 focus:ring-4 focus:ring-red-100 outline-none mb-6 transition-all"
             />
             <button 
               onClick={() => {
                 const val = document.getElementById('numMesaInput').value;
                 if(val) window.location.search = `?mesa=${val}`;
               }}
-              className="bg-red-600 text-white font-black py-4 px-8 rounded-full shadow-lg"
+              className="bg-red-600 text-white text-lg font-black py-4 px-8 rounded-full shadow-lg hover:bg-red-700 hover:scale-105 transition-all"
             >
               Entrar a la mesa
             </button>
-            <button onClick={() => supabase.auth.signOut()} className="mt-12 text-sm text-gray-500 font-bold">Cerrar sesión</button>
+            <button onClick={() => supabase.auth.signOut()} className="mt-12 text-sm text-gray-400 font-bold hover:text-red-600">Cerrar sesión de usuario</button>
           </div>
         );
       }
 
-      // Si hay usuario y sabemos la mesa, mostramos la interfaz principal
+      // Si todo va bien, mostramos la App principal
       return <MesaView numMesa={mesaParam} user={user} />;
     }
 
-    // Renderizamos la App en el div root
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+    // Renderizamos la App de forma segura
+    try {
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    } catch (e) {
+      document.getElementById('root').innerHTML = `<div style="padding:20px; color:red; font-family:sans-serif;">Error al pintar React: ${e.message}</div>`;
+    }
   </script>
 </body>
 </html>
