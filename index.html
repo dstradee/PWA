@@ -6,26 +6,57 @@
   <title>Bokalia - Pide desde tu mesa</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
-    body { font-family: system-ui, sans-serif; background: #f3f4f6; margin: 0; -webkit-tap-highlight-color: transparent; }
-    /* Animaciones suaves para modales */
+    body { font-family: system-ui, sans-serif; background: #111827; margin: 0; -webkit-tap-highlight-color: transparent; }
     @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     .animate-slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     .animate-fade-in { animation: fadeIn 0.3s ease forwards; }
+    
+    /* TRUCO SENIOR: Este transform obliga a que todos los elementos "fixed" (como el carrito o los modales) 
+       se queden atrapados dentro del ancho de este div, simulando un móvil perfecto en ordenador */
+    .mobile-container {
+      transform: translate(0); 
+    }
   </style>
 </head>
-<body class="flex justify-center bg-gray-900">
-  <!-- Contenedor formato móvil -->
-  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl"></div>
+<body class="flex justify-center min-h-screen">
+  
+  <!-- Contenedor formato móvil estricto -->
+  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container">
+    <!-- PANTALLA DE CARGA NATIVA (Evita la pantalla en blanco mientras carga React) -->
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background-color:#fefce8; color:#dc2626; font-family:sans-serif;">
+      <h1 style="font-size:3rem; font-weight:900; margin:0; letter-spacing:-2px;">BOKALIA</h1>
+      <p style="font-weight:bold; margin-top:10px; opacity:0.7;">Iniciando sistema...</p>
+    </div>
+  </div>
 
   <script type="text/babel">
     const { useState, useEffect } = React;
+
+    // --- ESCUDO ANTI-PANTALLA BLANCA ---
+    class ErrorBoundary extends React.Component {
+      constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+      static getDerivedStateFromError(error) { return { hasError: true, error }; }
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="p-8 flex flex-col items-center justify-center min-h-screen bg-red-50 text-center">
+              <div className="text-6xl mb-4">🚨</div>
+              <h1 className="text-2xl font-black text-red-600 mb-2">Algo ha fallado</h1>
+              <p className="text-gray-700 text-sm mb-6">{this.state.error.toString()}</p>
+              <button onClick={() => window.location.reload()} className="bg-red-600 text-white font-bold py-3 px-6 rounded-xl">Recargar App</button>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
 
     const supabase = window.supabase.createClient(
       'https://bswlriuzeintgjioywtz.supabase.co',
@@ -38,8 +69,7 @@
       { id: 'prod_3', nombre: 'Patatas Bravas', precio: 4.50, imagen_url: 'https://images.unsplash.com/photo-1541592106381-b31e9677c0e5?w=500', categoria: 'Entrantes' }
     ];
 
-    function App() {
-      // ESTADOS PRINCIPALES
+    function MainApp() {
       const [vistaActual, setVistaActual] = useState('mesa');
       const [mesaParam, setMesaParam] = useState(null);
       const [user, setUser] = useState(null);
@@ -52,39 +82,43 @@
       
       const [rondas, setRondas] = useState([]);
       const [carrito, setCarrito] = useState([]);
-      
       const [ultimoPedido, setUltimoPedido] = useState(null);
       
-      // ESTADOS UI (MODALES)
       const [loading, setLoading] = useState(true);
       const [showAuthModal, setShowAuthModal] = useState(false);
-      const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+      const [authMode, setAuthMode] = useState('login'); 
       const [email, setEmail] = useState('');
       const [password, setPassword] = useState('');
       
-      const [showModoMesa, setShowModoMesa] = useState(false); // Modal para separar cuenta
+      const [showModoMesa, setShowModoMesa] = useState(false);
       const [showJoinPrompt, setShowJoinPrompt] = useState(false);
       const [showReviewModal, setShowReviewModal] = useState(false);
       const [toastMsg, setToastMsg] = useState('');
 
       useEffect(() => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const mesa = urlParams.get('mesa');
-        if (mesa) setMesaParam(parseInt(mesa));
+        try {
+          const urlParams = new URLSearchParams(window.location.search);
+          const mesa = urlParams.get('mesa');
+          if (mesa) setMesaParam(parseInt(mesa));
 
-        cargarMenu();
+          cargarMenu();
 
-        supabase.auth.getSession().then(({ data }) => {
-          if (data?.session?.user) procesarUsuario(data.session.user);
-          else setLoading(false);
-        });
+          supabase.auth.getSession().then(({ data, error }) => {
+            if (error) throw error;
+            if (data?.session?.user) procesarUsuario(data.session.user);
+            else setLoading(false);
+          }).catch(() => setLoading(false));
 
-        const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
-          if(session?.user) procesarUsuario(session.user);
-          else { setUser(null); setUserProfile(null); setUltimoPedido(null); }
-        });
+          const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
+            if(session?.user) procesarUsuario(session.user);
+            else { setUser(null); setUserProfile(null); setUltimoPedido(null); }
+          });
 
-        return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
+          return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
+        } catch (err) {
+          console.error("Error al iniciar:", err);
+          setLoading(false);
+        }
       }, []);
 
       useEffect(() => {
@@ -105,8 +139,6 @@
           return () => supabase.removeChannel(channel);
         }
       }, [sesionActiva]);
-
-      // --- LOGICA DE DATOS ---
 
       const procesarUsuario = async (authUser) => {
         setUser(authUser);
@@ -141,10 +173,8 @@
         if (data) {
           if (user && data.host_id !== user.id) {
             if (data.compartida === false) {
-              // Mesa bloqueada por el Host (Yo Solo)
               setMesaBloqueada(true);
             } else {
-              // Mesa Tricount (Con Amigos)
               setHostName(data.host?.nombre || data.host?.email || 'Un amigo');
               setShowJoinPrompt(true);
             }
@@ -159,41 +189,27 @@
         if (data) setRondas(data);
       };
 
-      // --- LOGICA DE AUTH ---
-      
       const handleAuth = async () => {
         setLoading(true);
-        const { data, error } = authMode === 'register'
+        const { error } = authMode === 'register'
           ? await supabase.auth.signUp({ email, password })
           : await supabase.auth.signInWithPassword({ email, password });
           
         setLoading(false);
-        if (error) {
-          alert("Error: " + error.message);
-        } else {
-          setShowAuthModal(false);
-          // procesarUsuario se llama automáticamente por el AuthListener
-        }
+        if (error) alert("Error: " + error.message);
+        else setShowAuthModal(false);
       };
-
-      // --- LOGICA DE PEDIDOS ---
 
       const intentarEnviarPedido = () => {
         if (!user) return setShowAuthModal(true);
-        
-        // Si no hay sesión, es el primer pedido de la mesa. Preguntamos el modo.
-        if (!sesionActiva) {
-          setShowModoMesa(true);
-        } else {
-          procesarEnvio(sesionActiva.compartida);
-        }
+        if (!sesionActiva) setShowModoMesa(true);
+        else procesarEnvio(sesionActiva.compartida);
       };
 
       const procesarEnvio = async (esCompartida) => {
         setShowModoMesa(false);
         let idDeSesion = sesionActiva?.id;
 
-        // 1. Crear sesión si es el primer pedido
         if (!idDeSesion) {
           const { data } = await supabase.from('sesiones_mesa')
             .insert([{ num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida }])
@@ -202,12 +218,10 @@
           setSesionActiva(data);
         }
 
-        // 2. Crear Ronda
         const { data: ronda } = await supabase.from('pedidos_rondas')
           .insert([{ sesion_id: idDeSesion, usuario_id: user.id }]).select().single();
 
         if (ronda) {
-          // 3. Agrupar carrito
           const conteo = {};
           carrito.forEach(p => { conteo[p.id] = (conteo[p.id] || 0) + 1; });
           
@@ -217,13 +231,12 @@
           
           await supabase.from('items_pedido').insert(itemsInsert);
           
-          // 4. Sumar puntos
+          // Ganar puntos UNIVERSALES
           const totalGastado = carrito.reduce((sum, p) => sum + p.precio, 0);
           const puntosGanados = Math.floor(totalGastado * 20); 
           await supabase.from('usuarios').update({ puntos: (userProfile?.puntos || 0) + puntosGanados }).eq('id', user.id);
           procesarUsuario(user);
           
-          // 5. Éxito
           setCarrito([]);
           cargarRondasMesa(idDeSesion);
           mostrarToast("¡Orden enviada a cocina! 🚀");
@@ -244,14 +257,12 @@
         }, 5000); 
       };
 
-      // ==========================================
-      // COMPONENTES UI
-      // ==========================================
+      // --- RENDERIZADO UI ---
 
       const Toast = () => {
         if (!toastMsg) return null;
         return (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 animate-fade-in w-11/12 max-w-sm">
+          <div className="absolute top-20 left-1/2 transform -translate-x-1/2 z-50 animate-fade-in w-11/12 max-w-sm">
             <div className="bg-green-500 text-white font-black px-6 py-4 rounded-2xl shadow-xl flex items-center justify-between">
               <span>{toastMsg}</span>
               <span>✅</span>
@@ -260,33 +271,44 @@
         );
       };
 
-      // --- MESA BLOQUEADA ---
+      if (loading) return (
+        <div className="h-screen flex items-center justify-center bg-yellow-50 flex-col">
+           <div className="w-16 h-16 border-8 border-red-200 border-t-red-600 rounded-full animate-spin mb-6"></div>
+           <h2 className="text-2xl font-black text-red-600 tracking-tighter animate-pulse">Cargando Bokalia</h2>
+        </div>
+      );
+
+      // MESA BLOQUEADA
       if (mesaBloqueada) {
         return (
           <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-6 text-center">
-            <div className="text-6xl mb-4">🔒</div>
+            <div className="text-7xl mb-6">🔒</div>
             <h1 className="text-3xl font-black text-gray-800 mb-2">Mesa Cerrada</h1>
-            <p className="text-gray-500 font-medium">Esta mesa está ocupada y configurada como "Cuenta Única". No admite más comensales en la app.</p>
-            <button onClick={() => window.location.search=''} className="mt-8 text-red-600 font-bold">Cambiar de mesa</button>
+            <p className="text-gray-500 font-medium">Esta mesa está ocupada y configurada como "Cuenta Única". No admite más comensales.</p>
+            <button onClick={() => window.location.href = '/'} className="mt-8 text-red-600 font-black text-lg p-4">Elegir otra mesa</button>
           </div>
         );
       }
 
-      // --- PANTALLA INICIAL ---
+      // ELEGIR MESA
       if (!mesaParam) return (
         <div className="min-h-screen bg-yellow-50 flex flex-col justify-center items-center p-6 text-center">
-          <div className="bg-white p-8 rounded-[2rem] shadow-xl w-full">
+          <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl w-full">
             <h1 className="text-5xl font-black text-red-600 mb-2 tracking-tighter">BOKALIA</h1>
             <p className="text-gray-500 mb-8 font-bold text-lg">¿En qué mesa te sientas?</p>
-            <input type="number" id="inputMesa" className="text-center text-6xl font-black w-full p-4 rounded-2xl bg-gray-50 border-2 border-gray-200 mb-6 outline-none focus:border-red-500" placeholder="0" />
-            <button onClick={() => window.location.search = `?mesa=${document.getElementById('inputMesa').value}`} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-2xl text-2xl shadow-lg transition-all">Empezar a pedir</button>
+            <input type="number" id="inputMesa" className="text-center text-6xl font-black w-full p-4 rounded-[2rem] bg-gray-50 border-4 border-gray-200 mb-6 outline-none focus:border-red-500 transition-colors" placeholder="0" />
+            <button onClick={() => {
+                const num = document.getElementById('inputMesa').value;
+                if(num) window.location.search = `?mesa=${num}`;
+              }} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-[2rem] text-2xl shadow-xl">
+              Empezar
+            </button>
           </div>
         </div>
       );
 
-      // --- RENDER PRINCIPAL ---
       return (
-        <div className="pb-32 bg-gray-50 min-h-screen relative">
+        <div className="pb-36 bg-gray-50 min-h-screen relative flex flex-col">
           <Toast />
 
           {/* CABECERA ROJA */}
@@ -294,64 +316,60 @@
             <div className="flex justify-between items-center">
               <h1 className="font-black text-2xl text-yellow-400 tracking-tighter">BOKALIA</h1>
               {userProfile ? (
-                 <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-red-100">{userProfile.email.split('@')[0]}</span>
-                    <button onClick={() => supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-3 py-2 rounded-xl">Salir</button> 
-                 </div>
+                 <button onClick={() => supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-3 py-2 rounded-xl active:bg-red-900">Cerrar Sesión</button> 
               ) : (
                  <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-black bg-yellow-400 text-red-900 px-5 py-2 rounded-xl shadow-sm">Entrar</button>
               )}
             </div>
-            {/* Navegación */}
             <div className="flex gap-4 border-t border-red-500 pt-3 mt-3">
               <button onClick={() => setVistaActual('mesa')} className={`font-bold pb-2 border-b-2 ${vistaActual==='mesa' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Mesa {mesaParam}</button>
               <button onClick={() => setVistaActual('reservas')} className={`font-bold pb-2 border-b-2 ${vistaActual==='reservas' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Reservas</button>
             </div>
           </header>
 
-          {/* RESERVAS VISTA */}
+          {/* VISTA RESERVAS */}
           {vistaActual === 'reservas' && (
-            <div className="p-8 text-center mt-20 animate-fade-in">
+            <div className="p-8 text-center mt-20 animate-fade-in flex-grow">
               <div className="text-6xl mb-6">📅</div>
               <h2 className="text-3xl font-black text-gray-800 mb-4">Próximamente</h2>
               <p className="text-gray-500 font-medium text-lg">Estamos preparando el mejor sistema de reservas.</p>
             </div>
           )}
 
-          {/* MESA VISTA */}
+          {/* VISTA MESA */}
           {vistaActual === 'mesa' && (
-            <div className="animate-fade-in">
+            <div className="animate-fade-in flex-grow relative">
               
-              {/* TARJETA FIDELIZACIÓN (BANCO) */}
+              {/* TARJETA FIDELIZACIÓN (UNIVERSAL) */}
               <div className="m-4">
                 {!userProfile ? (
-                  <div className="relative overflow-hidden rounded-3xl p-6 shadow-md bg-gradient-to-br from-gray-700 to-gray-900 text-white cursor-pointer" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
+                  <div className="relative overflow-hidden rounded-[2rem] p-6 shadow-lg bg-gradient-to-br from-gray-700 to-gray-900 text-white cursor-pointer" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
                     <div className="absolute inset-0 bg-black/40 z-10 flex flex-col items-center justify-center text-center p-4 backdrop-blur-[2px]">
                         <h3 className="font-black text-xl text-yellow-400 mb-1">Activa tu Wallet</h3>
-                        <p className="text-xs font-medium text-white/90">Regístrate para ganar puntos y conseguir comida gratis.</p>
-                        <button className="mt-3 bg-red-600 px-6 py-2 rounded-full font-bold text-sm">Crear cuenta</button>
+                        <p className="text-xs font-medium text-white/90">Regístrate para ganar puntos universales y premios.</p>
+                        <button className="mt-4 bg-red-600 px-8 py-3 rounded-full font-black text-sm shadow-lg">Crear cuenta</button>
                     </div>
-                    <div className="opacity-30 blur-sm pointer-events-none">
+                    <div className="opacity-20 blur-sm pointer-events-none">
                         <p className="text-[10px] font-bold uppercase mb-1">Bokalia Wallet</p>
                         <p className="text-3xl font-black mb-4">0 pts</p>
-                        <div className="h-2 w-full bg-white/20 rounded-full"></div>
+                        <div className="h-3 w-full bg-white/20 rounded-full"></div>
                     </div>
                   </div>
                 ) : (
-                  <div className="relative overflow-hidden rounded-3xl p-6 shadow-xl bg-gradient-to-br from-yellow-400 to-yellow-600 text-yellow-900">
-                    <div className="absolute -right-6 -top-6 w-32 h-32 rounded-full bg-white opacity-20"></div>
+                  <div className="relative overflow-hidden rounded-[2rem] p-6 shadow-xl bg-gradient-to-br from-yellow-400 to-yellow-500 text-yellow-900">
+                    <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-white opacity-20"></div>
                     <div className="relative z-10 flex justify-between items-start mb-6">
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-80">Bokalia Wallet</p>
-                        <p className="text-4xl font-black tracking-tighter">{userProfile.puntos || 0} <span className="text-lg font-medium opacity-80">pts</span></p>
+                        <p className="text-4xl font-black tracking-tighter">{userProfile.puntos || 0} <span className="text-lg font-bold opacity-80">pts</span></p>
                       </div>
-                      <div className="bg-white/30 px-3 py-1 rounded-full text-xs font-black uppercase shadow-sm">
+                      <div className="bg-white/40 backdrop-blur-md px-3 py-1.5 rounded-xl text-xs font-black uppercase shadow-sm border border-white/50">
                         {(userProfile.puntos||0) > 500 ? 'VIP ORO' : 'VIP BRONCE'}
                       </div>
                     </div>
                     <div className="relative z-10">
                       <div className="flex justify-between text-xs font-black opacity-80 mb-2">
-                        <span>Próximo Goal: Burger Gratis</span>
+                        <span>Meta: Burger Gratis</span>
                         <span>{userProfile.puntos || 0} / 1500</span>
                       </div>
                       <div className="h-3 w-full bg-black/10 rounded-full overflow-hidden shadow-inner">
@@ -362,48 +380,45 @@
                 )}
               </div>
 
-              {/* MESA COMPARTIDA AVISO (TRICOUNT) */}
+              {/* UNIRSE A MESA TRICOUNT */}
               {showJoinPrompt && (
-                <div className="bg-yellow-400 p-5 mx-4 mt-2 mb-6 rounded-3xl shadow-lg text-center">
-                  <h3 className="font-black text-2xl text-red-900 mb-1">¡Mesa Ocupada!</h3>
-                  <p className="text-sm text-red-800 mb-4 font-bold">Abierta por <b>{hostName}</b>. ¿Es tu grupo?</p>
+                <div className="bg-yellow-400 p-6 mx-4 mt-2 mb-6 rounded-[2rem] shadow-lg text-center animate-slide-up">
+                  <h3 className="font-black text-2xl text-red-900 mb-2">¡Mesa Ocupada!</h3>
+                  <p className="text-sm text-red-800 mb-5 font-bold">Esta mesa la abrió <b>{hostName}</b>. ¿Es tu grupo?</p>
                   <button onClick={() => setShowJoinPrompt(false)} className="w-full bg-white text-red-900 font-black py-4 rounded-2xl shadow-sm text-lg active:scale-95 transition-transform">Sí, unirme a su cuenta</button>
                 </div>
               )}
 
               <div className="p-4">
-                {/* UPSELLING */}
                 {ultimoPedido && (
                   <div className="bg-gradient-to-r from-orange-500 to-red-500 p-1.5 rounded-[2rem] shadow-lg mb-8">
-                    <div className="bg-white/10 backdrop-blur-sm rounded-[1.7rem] p-4 flex items-center justify-between border border-white/20">
+                    <div className="bg-white/10 backdrop-blur-sm rounded-[1.6rem] p-4 flex items-center justify-between border border-white/20">
                       <div>
-                        <span className="bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-1 rounded uppercase shadow-sm">Pídelo de nuevo</span>
+                        <span className="bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-1 rounded-lg uppercase shadow-sm tracking-widest">Pídelo de nuevo</span>
                         <p className="text-white font-black text-xl mt-1 leading-tight">{ultimoPedido.nombre}</p>
                       </div>
-                      <button onClick={() => setCarrito([...carrito, { ...ultimoPedido, idUnico: Math.random() }])} className="bg-white text-red-600 font-black py-3 px-5 rounded-xl shadow-lg active:scale-95 transition-transform text-sm">
+                      <button onClick={() => setCarrito([...carrito, { ...ultimoPedido, idUnico: Math.random() }])} className="bg-white text-red-600 font-black py-3 px-5 rounded-2xl shadow-lg active:scale-95 transition-transform text-sm">
                         + Añadir
                       </button>
                     </div>
                   </div>
                 )}
 
-                <h2 className="text-2xl font-black text-gray-800 mb-4 ml-1">La Carta</h2>
+                <h2 className="text-2xl font-black text-gray-800 mb-4 ml-1 tracking-tight">La Carta</h2>
                 
-                {/* PRODUCTOS */}
-                <div className="grid grid-cols-2 gap-3 mb-8">
+                <div className="grid grid-cols-2 gap-4 mb-8">
                   {productos.map(p => (
-                    <div key={p.id} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100 flex flex-col">
+                    <div key={p.id} className="bg-white rounded-3xl overflow-hidden shadow-md border border-gray-100 flex flex-col active:shadow-sm transition-all">
                       <div className="h-32 bg-gray-200"><img src={p.imagen_url} className="w-full h-full object-cover" /></div>
                       <div className="p-4 flex flex-col flex-grow">
                         <h3 className="font-black text-gray-800 text-sm leading-tight">{p.nombre}</h3>
-                        <p className="text-orange-500 font-black mt-1 mb-3 text-lg">{p.precio}€</p>
-                        <button onClick={() => setCarrito([...carrito, { ...p, idUnico: Math.random() }])} className="mt-auto w-full bg-red-50 text-red-600 font-black py-3 rounded-xl text-sm active:bg-red-600 active:text-white transition-colors">Añadir</button>
+                        <p className="text-orange-500 font-black mt-1 mb-4 text-xl">{p.precio}€</p>
+                        <button onClick={() => setCarrito([...carrito, { ...p, idUnico: Math.random() }])} className="mt-auto w-full bg-red-50 text-red-600 font-black py-3 rounded-2xl text-sm active:bg-red-600 active:text-white transition-colors">Añadir</button>
                       </div>
                     </div>
                   ))}
                 </div>
 
-                {/* CESTA GRUPAL */}
                 {rondas.length > 0 && (
                   <div className="mb-8">
                     <div className="flex justify-between items-center mb-4 ml-1">
@@ -412,18 +427,18 @@
                         Mesa en directo
                       </h2>
                       {sesionActiva.estado === 'activa' && (
-                        <button onClick={pedirCuenta} className="bg-gray-900 text-white text-xs font-black px-4 py-3 rounded-xl shadow-lg active:bg-black">Pedir Cuenta</button>
+                        <button onClick={pedirCuenta} className="bg-gray-900 text-white text-xs font-black px-5 py-3 rounded-2xl shadow-lg active:bg-black transition-colors">Pedir Cuenta</button>
                       )}
                     </div>
                     {rondas.map((ronda, i) => (
-                      <div key={ronda.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 mb-3">
+                      <div key={ronda.id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-gray-100 mb-4">
                         <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-3">
-                          <p className="font-black text-gray-400 text-sm uppercase">Ronda #{i+1}</p>
-                          <span className="text-[10px] font-black text-orange-600 bg-orange-100 px-2 py-1 rounded uppercase tracking-widest">{ronda.estado}</span>
+                          <p className="font-black text-gray-400 text-sm uppercase tracking-widest">Ronda #{i+1}</p>
+                          <span className="text-[10px] font-black text-orange-600 bg-orange-100 px-3 py-1 rounded-full uppercase tracking-widest">{ronda.estado}</span>
                         </div>
-                        <ul className="text-sm text-gray-700 space-y-3">
+                        <ul className="text-sm text-gray-800 space-y-3">
                           {ronda.items?.map((item, idx) => (
-                            <li key={idx} className="flex gap-3 font-bold items-center text-base"><span className="bg-gray-100 text-red-600 w-8 h-8 flex items-center justify-center rounded-lg">{item.cantidad}x</span>{item.producto?.nombre}</li>
+                            <li key={idx} className="flex gap-3 font-bold items-center text-base"><span className="bg-gray-100 text-red-600 w-8 h-8 flex items-center justify-center rounded-xl">{item.cantidad}x</span>{item.producto?.nombre}</li>
                           ))}
                         </ul>
                       </div>
@@ -434,6 +449,96 @@
             </div>
           )}
 
-          {/* CARRITO INDIVIDUAL FLOTANTE */}
+          {/* CARRITO FLOTANTE (ABSOLUTE para que no se rompa en PC) */}
           {carrito.length > 0 && vistaActual === 'mesa' && (
-            <div className="fixed bottom-0 left-0 w-full bg-
+            <div className="absolute bottom-0 left-0 w-full bg-white p-5 shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.15)] z-20 animate-slide-up rounded-t-[2rem]">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tu pedido</p>
+                  <p className="text-3xl font-black text-gray-800 tracking-tighter">{carrito.length} <span className="text-base font-bold text-gray-500">ítems</span></p>
+                </div>
+                <button onClick={intentarEnviarPedido} className="bg-green-500 text-white font-black py-4 px-6 rounded-2xl shadow-[0_8px_20px_rgba(34,197,94,0.4)] text-lg flex items-center gap-2 active:scale-95 transition-transform">
+                  Enviar a cocina
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* MODALES ABSOLUTES */}
+          {showAuthModal && (
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
+              <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full relative shadow-2xl animate-slide-up">
+                <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
+                
+                {authMode === 'login' ? (
+                  <>
+                    <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">Hola</h3>
+                    <p className="text-gray-500 mb-8 font-medium text-sm">Entra para acceder a tu Wallet universal.</p>
+                    <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
+                    <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
+                    <button onClick={handleAuth} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl text-xl active:scale-95 transition-transform mb-4 shadow-lg shadow-red-600/30">Entrar</button>
+                    <button onClick={() => setAuthMode('register')} className="w-full text-red-600 font-bold py-3">No tengo cuenta, crear una</button>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">Únete</h3>
+                    <p className="text-gray-500 mb-8 font-medium text-sm">Crea tu cuenta y empieza a ganar puntos.</p>
+                    <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
+                    <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
+                    <button onClick={handleAuth} className="w-full bg-yellow-400 text-yellow-900 font-black py-5 rounded-2xl text-xl active:scale-95 transition-transform mb-4 shadow-lg shadow-yellow-400/50">Registrarme</button>
+                    <button onClick={() => setAuthMode('login')} className="w-full text-gray-500 font-bold py-3">Ya tengo cuenta, iniciar sesión</button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {showModoMesa && (
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white rounded-[2.5rem] p-8 w-full relative shadow-2xl animate-slide-up text-center">
+                <button onClick={() => setShowModoMesa(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
+                <div className="text-6xl mb-6 mt-4">🍕</div>
+                <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Cómo vais a pedir?</h3>
+                <p className="text-gray-500 text-sm font-medium mb-10">Elige la configuración para esta mesa.</p>
+                
+                <div className="flex flex-col gap-4">
+                  <button onClick={() => procesarEnvio(true)} className="w-full bg-yellow-400 text-yellow-900 font-black py-6 px-4 rounded-3xl shadow-xl shadow-yellow-400/30 active:scale-95 transition-transform flex flex-col items-center">
+                    <span className="text-xl">Con Amigos</span>
+                    <span className="text-xs font-bold opacity-70 mt-1 uppercase tracking-widest">Cuentas Separadas</span>
+                  </button>
+                  
+                  <button onClick={() => procesarEnvio(false)} className="w-full bg-white text-gray-800 font-black py-6 px-4 rounded-3xl border-[3px] border-gray-200 active:scale-95 transition-transform flex flex-col items-center">
+                    <span className="text-xl">Yo Solo</span>
+                    <span className="text-xs font-bold opacity-50 mt-1 uppercase tracking-widest">Mesa Exclusiva</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showReviewModal && (
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white rounded-[2.5rem] p-8 w-full text-center animate-slide-up">
+                <div className="text-5xl mb-4">⭐</div>
+                <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Qué tal la comida?</h3>
+                <p className="text-sm text-gray-500 mb-8 font-medium">Toca las estrellas para valorarnos.</p>
+                <div className="flex justify-center gap-3 mb-10">
+                  {[1,2,3,4,5].map(star => (
+                    <button key={star} onClick={() => { window.open('https://maps.google.com', '_blank'); setShowReviewModal(false); }} className="text-5xl text-yellow-400 active:scale-75 transition-transform">★</button>
+                  ))}
+                </div>
+                <button onClick={() => setShowReviewModal(false)} className="text-sm font-bold text-gray-400 uppercase tracking-widest">Saltar</button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    // Envolvemos toda la app en el escudo
+    root.render(<ErrorBoundary><MainApp /></ErrorBoundary>);
+  </script>
+</body>
+</html>
