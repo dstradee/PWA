@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#dc2626">
+  <title>Bokalia - Pide desde tu mesa</title>
+  
+  <!-- Tailwind CSS para los estilos Fast Food -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & ReactDOM (Lógica) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  
+  <!-- Babel (Para poder escribir código moderno JSX en el propio HTML) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Supabase JS -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    /* Ocultar barra de scroll para que parezca una app nativa */
+    ::-webkit-scrollbar { display: none; }
+    body { -ms-overflow-style: none; scrollbar-width: none; font-family: system-ui, -apple-system, sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div id="root"></div>
+
+  <!-- AQUI EMPIEZA LA MAGIA DE REACT EN UN SOLO ARCHIVO -->
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // ==========================================
+    // 1. CONFIGURACIÓN DE SUPABASE
+    // ==========================================
+    // TODO: RELLENA ESTO CUANDO TENGAS LAS CREDENCIALES
+    const SUPABASE_URL = 'PON_AQUI_TU_SUPABASE_URL';
+    const SUPABASE_ANON_KEY = 'PON_AQUI_TU_SUPABASE_ANON_KEY';
+    
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // ==========================================
+    // 2. COMPONENTE DE AUTENTICACIÓN
+    // ==========================================
+    function Auth({ onLogin }) {
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      const handleAuth = async (isSignUp) => {
+        setLoading(true);
+        const { error } = isSignUp 
+          ? await supabase.auth.signUp({ email, password })
+          : await supabase.auth.signInWithPassword({ email, password });
+          
+        if (error) alert(error.message);
+        setLoading(false);
+      };
+
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen bg-yellow-50 p-4">
+          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border-2 border-red-100">
+            <div className="bg-red-600 p-8 text-center">
+              <h1 className="text-4xl font-black text-yellow-400 tracking-tighter">BOKALIA</h1>
+              <p className="text-red-100 font-medium mt-2">Pide, come y disfruta.</p>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <input
+                type="email" placeholder="Tu email"
+                value={email} onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-gray-100 focus:bg-white focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+              />
+              <input
+                type="password" placeholder="Contraseña"
+                value={password} onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-gray-100 focus:bg-white focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+              />
+              
+              <div className="flex space-x-3 pt-4">
+                <button
+                  onClick={() => handleAuth(false)} disabled={loading}
+                  className="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-black py-3 rounded-xl shadow-md"
+                >
+                  Entrar
+                </button>
+                <button
+                  onClick={() => handleAuth(true)} disabled={loading}
+                  className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-red-900 font-black py-3 rounded-xl shadow-md"
+                >
+                  Registrarse
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 3. COMPONENTE PRINCIPAL (MESA Y PEDIDOS)
+    // ==========================================
+    function MesaView({ numMesa, user }) {
+      const [sesion, setSesion] = useState(null);
+      const [productos, setProductos] = useState([]);
+      const [miCarrito, setMiCarrito] = useState([]);
+      const [rondasMesa, setRondasMesa] = useState([]);
+
+      useEffect(() => {
+        cargarProductos();
+        verificarSesionMesa();
+      }, [numMesa]);
+
+      useEffect(() => {
+        if (!sesion) return;
+
+        // Escuchar cambios en tiempo real
+        const canal = supabase.channel(`mesa_${sesion.id}`)
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pedidos_rondas', filter: `sesion_id=eq.${sesion.id}` }, () => {
+            cargarRondasMesa(sesion.id);
+          })
+          .subscribe();
+
+        cargarRondasMesa(sesion.id);
+        return () => supabase.removeChannel(canal);
+      }, [sesion]);
+
+      const cargarProductos = async () => {
+        const { data } = await supabase.from('productos').select('*');
+        if (data) setProductos(data);
+      };
+
+      const verificarSesionMesa = async () => {
+        const { data } = await supabase
+          .from('sesiones_mesa')
+          .select('*')
+          .eq('num_mesa', numMesa)
+          .eq('estado', 'activa')
+          .single();
+        if (data) setSesion(data);
+      };
+
+      const crearSesionMesa = async () => {
+        const { data, error } = await supabase
+          .from('sesiones_mesa')
+          .insert([{ num_mesa: numMesa, host_id: user.id, estado: 'activa' }])
+          .select().single();
+        if (data) setSesion(data);
+        else alert("Error al abrir mesa. ¿Ejecutaste el SQL de las tablas?");
+      };
+
+      const cargarRondasMesa = async (sesionId) => {
+        const { data } = await supabase
+          .from('pedidos_rondas')
+          .select('*, items:items_pedido(*, producto:productos(nombre))')
+          .eq('sesion_id', sesionId);
+        if (data) setRondasMesa(data);
+      };
+
+      const agregarAlCarrito = (producto) => {
+        setMiCarrito([...miCarrito, { ...producto, idTemp: Math.random() }]);
+      };
+
+      const enviarRondaACocina = async () => {
+        if (miCarrito.length === 0 || !sesion) return;
+        
+        const { data: ronda } = await supabase
+          .from('pedidos_rondas')
+          .insert([{ sesion_id: sesion.id, usuario_id: user.id }])
+          .select().single();
+
+        if (ronda) {
+          const map = miCarrito.reduce((acc, p) => {
+            acc[p.id] = (acc[p.id] || 0) + 1;
+            return acc;
+          }, {});
+
+          const items = Object.keys(map).map(prodId => ({
+            ronda_id: ronda.id,
+            producto_id: prodId,
+            cantidad: map[prodId],
+            precio_unitario: miCarrito.find(p => p.id === prodId).precio
+          }));
+
+          await supabase.from('items_pedido').insert(items);
+          setMiCarrito([]);
+          cargarRondasMesa(sesion.id);
+        }
+      };
+
+      const pedirCuenta = async () => {
+        await supabase.from('sesiones_mesa').update({ estado: 'pagando' }).eq('id', sesion.id);
+        alert('Cuenta solicitada. ¡El camarero va en camino!');
+      };
+
+      if (!sesion) {
+        return (
+          <div className="min-h-screen bg-yellow-50 flex flex-col items-center justify-center p-6 text-center">
+            <div className="w-24 h-24 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-6">
+              <span className="text-4xl font-black">{numMesa}</span>
+            </div>
+            <h2 className="text-3xl font-black text-gray-800 mb-2">Mesa libre</h2>
+            <p className="text-gray-500 mb-8">Nadie ha abierto esta mesa todavía.</p>
+            <button onClick={crearSesionMesa} className="bg-red-600 text-white font-black py-4 px-8 rounded-full shadow-xl hover:bg-red-700 w-full max-w-sm text-lg">
+              Abrir Mesa y Empezar a Pedir
+            </button>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen bg-gray-50 pb-32">
+          {/* Cabecera */}
+          <div className="bg-red-600 text-white p-4 sticky top-0 z-10 flex justify-between items-center shadow-md">
+            <div>
+              <h1 className="text-xl font-black text-yellow-400">BOKALIA</h1>
+              <p className="text-xs font-medium">Mesa {numMesa} • Activa</p>
+            </div>
+            <button onClick={pedirCuenta} className="bg-yellow-400 text-red-900 font-bold px-4 py-2 rounded-lg text-sm shadow-sm hover:bg-yellow-500">
+              Pedir Cuenta
+            </button>
+          </div>
+
+          <div className="p-4">
+            <h2 className="text-2xl font-black text-gray-800 mb-4 border-b-2 border-red-200 pb-2">Menú Principal</h2>
+            
+            <div className="grid grid-cols-2 gap-4 mb-8">
+              {productos.length === 0 ? <p className="text-gray-500 text-sm col-span-2">No hay productos en la BD.</p> : null}
+              {productos.map(p => (
+                <div key={p.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col overflow-hidden">
+                  <div className="h-24 bg-gray-200 w-full flex items-center justify-center text-gray-400 text-xs">
+                    {p.imagen_url ? <img src={p.imagen_url} className="w-full h-full object-cover"/> : 'Sin Imagen'}
+                  </div>
+                  <div className="p-3 flex-grow flex flex-col justify-between">
+                    <div>
+                      <h3 className="font-bold text-gray-800 leading-tight text-sm">{p.nombre}</h3>
+                      <p className="text-orange-500 font-black mt-1">{p.precio}€</p>
+                    </div>
+                    <button 
+                      onClick={() => agregarAlCarrito(p)}
+                      className="mt-3 w-full bg-red-50 text-red-600 font-bold py-2 rounded-xl text-sm hover:bg-red-600 hover:text-white transition-colors"
+                    >
+                      Añadir
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <h2 className="text-xl font-black text-gray-800 mb-4 border-b-2 border-orange-200 pb-2">Pedidos de la Mesa</h2>
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-orange-100">
+              {rondasMesa.length === 0 ? <p className="text-gray-400 text-sm">Nadie ha pedido nada aún.</p> : (
+                <div className="space-y-4">
+                  {rondasMesa.map((ronda, i) => (
+                    <div key={ronda.id} className="bg-orange-50 p-3 rounded-xl">
+                      <p className="font-black text-orange-800 text-sm mb-2 flex justify-between">
+                        Ronda #{i+1} 
+                        <span className="bg-orange-200 text-orange-900 px-2 py-1 rounded text-xs">{ronda.estado}</span>
+                      </p>
+                      <ul className="text-sm text-gray-700 space-y-1">
+                        {ronda.items?.map((item) => (
+                          <li key={item.id} className="flex gap-2">
+                            <span className="font-bold text-red-600">{item.cantidad}x</span> 
+                            <span>{item.producto?.nombre}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Botón Flotante del Carrito */}
+          {miCarrito.length > 0 && (
+            <div className="fixed bottom-0 left-0 w-full bg-white p-4 shadow-[0_-10px_20px_-5px_rgba(0,0,0,0.15)] z-20 border-t border-gray-100">
+              <div className="flex items-center justify-between max-w-md mx-auto">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Mi Pedido</p>
+                  <p className="text-xl font-black text-gray-800">{miCarrito.length} ítems</p>
+                </div>
+                <button 
+                  onClick={enviarRondaACocina}
+                  className="bg-green-500 text-white text-lg font-black py-4 px-6 rounded-2xl shadow-lg hover:bg-green-600 active:scale-95 transition-all flex items-center gap-2"
+                >
+                  Mandar a Cocina 🚀
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // 4. CONTROLADOR PRINCIPAL DE LA APP
+    // ==========================================
+    function App() {
+      const [user, setUser] = useState(null);
+      const [mesaParam, setMesaParam] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      useEffect(() => {
+        // Obtenemos si ha escaneado un QR simulado en la URL (ej: misitio.com/?mesa=4)
+        const params = new URLSearchParams(window.location.search);
+        const mesa = params.get('mesa');
+        if (mesa) setMesaParam(parseInt(mesa));
+
+        // Verificamos si ya hay un usuario logueado
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          setUser(session?.user || null);
+          setLoading(false);
+        });
+
+        // Escuchamos si entra o sale
+        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+          setUser(session?.user || null);
+        });
+
+        return () => authListener.subscription.unsubscribe();
+      }, []);
+
+      if (loading) return <div className="min-h-screen flex items-center justify-center bg-yellow-50 font-bold text-red-600">Cargando Bokalia...</div>;
+      
+      // Si no hay usuario, mostramos el login
+      if (!user) return <Auth />;
+
+      // Si no ha escaneado una mesa, le pedimos el número
+      if (!mesaParam) {
+        return (
+          <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-yellow-50 text-center">
+            <h1 className="text-4xl font-black text-red-600 mb-4">¡Hola!</h1>
+            <p className="text-gray-600 mb-8">¿En qué mesa te has sentado?</p>
+            <input 
+              type="number" id="numMesaInput" placeholder="Ej: 4" 
+              className="text-center text-3xl font-black w-32 py-4 rounded-2xl border-4 border-red-200 focus:border-red-600 outline-none mb-6"
+            />
+            <button 
+              onClick={() => {
+                const val = document.getElementById('numMesaInput').value;
+                if(val) window.location.search = `?mesa=${val}`;
+              }}
+              className="bg-red-600 text-white font-black py-4 px-8 rounded-full shadow-lg"
+            >
+              Entrar a la mesa
+            </button>
+            <button onClick={() => supabase.auth.signOut()} className="mt-12 text-sm text-gray-500 font-bold">Cerrar sesión</button>
+          </div>
+        );
+      }
+
+      // Si hay usuario y sabemos la mesa, mostramos la interfaz principal
+      return <MesaView numMesa={mesaParam} user={user} />;
+    }
+
+    // Renderizamos la App en el div root
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
