@@ -22,10 +22,10 @@
 </head>
 <body class="flex justify-center min-h-screen">
   
-  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container pb-10">
+  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container">
     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background-color:#fefce8; color:#dc2626;">
       <h1 style="font-size:3rem; font-weight:900; margin:0; letter-spacing:-2px;">BOKALIA</h1>
-      <p style="font-weight:bold; margin-top:10px; opacity:0.7;">Cargando perfil...</p>
+      <p style="font-weight:bold; margin-top:10px; opacity:0.7;">Cargando tu Wallet...</p>
     </div>
   </div>
 
@@ -48,16 +48,29 @@
       const [authMode, setAuthMode] = useState('login'); 
       const [email, setEmail] = useState('');
       const [password, setPassword] = useState('');
+      
+      const [showInstallTutorial, setShowInstallTutorial] = useState(false);
+      const [toastMsg, setToastMsg] = useState('');
 
+      // INICIO RÁPIDO
       useEffect(() => {
         supabase.auth.getSession().then(({ data }) => {
-          if (data?.session?.user) procesarUsuario(data.session.user);
-          else setLoading(false);
-        });
+          if (data?.session?.user) {
+             procesarUsuario(data.session.user);
+          } else {
+             setLoading(false);
+          }
+        }).catch(() => setLoading(false));
 
         const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
-          if(session?.user) procesarUsuario(session.user);
-          else { setUser(null); setUserProfile(null); setHistorial([]); setLoading(false); }
+          if (session?.user) {
+             procesarUsuario(session.user);
+          } else { 
+             setUser(null); 
+             setUserProfile(null); 
+             setHistorial([]); 
+             setLoading(false); 
+          }
         });
 
         return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
@@ -66,54 +79,80 @@
       const procesarUsuario = async (authUser) => {
         setUser(authUser);
         try {
+          // Buscamos puntos
           let { data } = await supabase.from('usuarios').select('*').eq('id', authUser.id).single();
           if (!data) {
+            // Si no existe, le damos 50 puntos de bienvenida
             const { data: newUser } = await supabase.from('usuarios').insert([{ id: authUser.id, email: authUser.email, puntos: 50 }]).select().single();
             data = newUser || { puntos: 50, email: authUser.email }; 
           }
           setUserProfile(data);
-          cargarHistorial(authUser.id);
-        } catch(e) { setUserProfile({ puntos: 0, email: authUser.email }); }
-        setLoading(false);
-      };
-
-      const cargarHistorial = async (userId) => {
-        const seisMesesAtras = new Date();
-        seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
-
-        const { data } = await supabase.from('pedidos_rondas')
-          .select('id, fecha, estado, sesion:sesiones_mesa!inner(estado), items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
-          .eq('usuario_id', userId).eq('oculto_usuario', false).eq('sesiones_mesa.estado', 'pagada')
-          .gte('fecha', seisMesesAtras.toISOString()).order('fecha', { ascending: false });
           
-        if (data) setHistorial(data.filter(h => h.items && h.items.length > 0));
+          // Buscamos Historial
+          const seisMesesAtras = new Date();
+          seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
+          const { data: dataHistorial } = await supabase.from('pedidos_rondas')
+            .select('id, fecha, estado, sesion:sesiones_mesa!inner(estado), items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
+            .eq('usuario_id', authUser.id).eq('oculto_usuario', false).eq('sesiones_mesa.estado', 'pagada')
+            .gte('fecha', seisMesesAtras.toISOString()).order('fecha', { ascending: false });
+            
+          if (dataHistorial) setHistorial(dataHistorial.filter(h => h.items && h.items.length > 0));
+
+        } catch(e) { 
+           console.error("Error cargando perfil", e);
+           setUserProfile({ puntos: 0, email: authUser.email }); 
+        } finally {
+           setLoading(false);
+        }
       };
 
       const handleAuth = async () => {
         setLoading(true);
-        const { error } = authMode === 'register' 
-            ? await supabase.auth.signUp({ email, password }) 
-            : await supabase.auth.signInWithPassword({ email, password });
+        const { error } = authMode === 'register' ? await supabase.auth.signUp({ email, password }) : await supabase.auth.signInWithPassword({ email, password });
         if (error) { setLoading(false); alert("Error: " + error.message); }
         else setShowAuthModal(false);
+      };
+
+      const borrarHistorial = async () => {
+        if (!user || historial.length === 0) return;
+        if (window.confirm("¿Limpiar tu historial visual?")) {
+           await supabase.from('pedidos_rondas').update({ oculto_usuario: true }).eq('usuario_id', user.id);
+           setHistorial([]);
+           mostrarToast("Historial ocultado 🧹");
+        }
       };
 
       const formatMoney = (num) => Number(num).toFixed(2);
       const formatDate = (dateStr) => {
         const d = new Date(dateStr);
-        return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
+        return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} a las ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
       };
+
+      const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
+
+      // ==========================================
+      // UI Y VISTAS
+      // ==========================================
 
       if (loading) return (
         <div className="h-screen flex items-center justify-center bg-yellow-50 flex-col">
            <div className="w-16 h-16 border-8 border-red-200 border-t-red-600 rounded-full animate-spin mb-6"></div>
-           <h2 className="text-2xl font-black text-red-600 tracking-tighter animate-pulse">Bokalia Wallet...</h2>
+           <h2 className="text-2xl font-black text-red-600 tracking-tighter animate-pulse">Cargando Wallet...</h2>
         </div>
       );
 
       return (
-        <div className="bg-gray-50 min-h-screen relative flex flex-col">
+        <div className="bg-gray-50 min-h-screen relative flex flex-col pb-10">
           
+          {toastMsg && (
+            <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[60] animate-fade-in w-11/12 max-w-sm">
+              <div className="bg-green-500 text-white font-black px-6 py-4 rounded-2xl shadow-xl flex items-center justify-between">
+                <span>{toastMsg}</span>
+              </div>
+            </div>
+          )}
+
+          {/* CABECERA ROJA */}
           <header className="bg-red-600 text-white p-5 shadow-md flex justify-between items-center rounded-b-3xl z-10 relative">
             <h1 className="font-black text-3xl text-yellow-400 tracking-tighter">BOKALIA</h1>
             {user ? (
@@ -123,9 +162,9 @@
             )}
           </header>
 
-          <main className="flex-grow p-4 -mt-4 z-0 relative">
+          <main className="flex-grow p-4 -mt-4 z-0 relative animate-fade-in">
             
-            {/* WALLLET CARD */}
+            {/* WALLLET CARD (UNIVERSAL) */}
             {!user ? (
                <div className="relative overflow-hidden rounded-[2rem] p-8 shadow-xl bg-gradient-to-br from-gray-800 to-black text-white cursor-pointer mt-4" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
                  <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center text-center p-6 backdrop-blur-sm">
@@ -166,35 +205,54 @@
                </div>
             )}
 
-            {/* BOTÓN IR AL LOCAL (Si no usan NFC) */}
-            <div className="mt-8 bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 text-center">
+            {/* BANNER INSTALAR APP (Solo si no estás en modo PWA y estás logueado) */}
+            {user && !window.matchMedia('(display-mode: standalone)').matches && !window.navigator.standalone && (
+               <div onClick={() => setShowInstallTutorial(true)} className="mt-4 bg-blue-600 text-white p-5 rounded-3xl flex justify-between items-center shadow-md cursor-pointer active:scale-95 transition-transform">
+                  <div>
+                     <p className="text-sm font-black mb-1">📲 Instala Bokalia</p>
+                     <p className="text-xs font-medium opacity-90">Añádela a tu pantalla de inicio.</p>
+                  </div>
+                  <button className="bg-white text-blue-600 text-xs font-black px-4 py-2 rounded-xl shadow-sm">Ver cómo</button>
+               </div>
+            )}
+
+            {/* BOTÓN IR AL LOCAL (Escaneo) */}
+            <div className="mt-6 bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 text-center">
                <h3 className="font-black text-xl text-gray-800 mb-2">¿Estás en el restaurante?</h3>
-               <p className="text-gray-500 text-sm font-medium mb-6">Acerca el móvil al logo NFC de la mesa para empezar a pedir.</p>
+               <p className="text-gray-500 text-sm font-medium mb-6">Acerca tu móvil a la pegatina <b>NFC</b> de la mesa para empezar a pedir al instante.</p>
                
-               {/* Un botón secundario por si el NFC del cliente está roto */}
-               <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-2xl border border-gray-200">
-                  <input type="number" id="manualMesa" placeholder="Nº Mesa" className="bg-transparent w-full text-center font-black text-xl outline-none" />
+               <div className="flex items-center justify-center p-4 bg-gray-50 rounded-2xl border border-gray-200">
+                  <div className="animate-pulse flex items-center gap-3 text-gray-500 font-bold">
+                     <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                     <span>Esperando escaneo NFC...</span>
+                  </div>
+               </div>
+               
+               {/* Botón manual por si acaso */}
+               <p className="text-xs font-bold text-gray-400 mt-4 mb-2">¿No funciona el NFC?</p>
+               <div className="flex items-center gap-2">
+                  <input type="number" id="manualMesa" placeholder="Nº Mesa" className="bg-gray-100 w-full text-center font-black text-xl p-3 rounded-xl outline-none focus:ring-2 ring-red-500" />
                   <button onClick={() => {
                      const num = document.getElementById('manualMesa').value;
-                     if(num) window.location.href = `index.html?mesa=${num}`; // Redirige a la app principal
-                  }} className="bg-gray-800 text-white font-black px-6 py-3 rounded-xl active:scale-95 transition-transform whitespace-nowrap">
-                     Ir
+                     if(num) window.location.href = `index.html?mesa=${num}`; 
+                  }} className="bg-red-600 text-white font-black px-6 py-3 rounded-xl active:scale-95 transition-transform">
+                     Entrar
                   </button>
                </div>
             </div>
 
             {/* HISTORIAL */}
-            <div className="mt-10">
-               <h2 className="text-2xl font-black text-gray-800 mb-6 tracking-tight flex items-center gap-2">
-                  <span>🍔</span> Últimos Pedidos
+            <div className="mt-8">
+               <h2 className="text-2xl font-black text-gray-800 mb-4 tracking-tight flex items-center gap-2">
+                  <span>🍔</span> Últimos Pedidos Pagados
                </h2>
                
                {!user ? (
                   <p className="text-gray-400 font-bold text-center py-6">Inicia sesión para ver tu historial.</p>
                ) : historial.length === 0 ? (
-                  <div className="bg-gray-100 p-8 rounded-3xl text-center">
+                  <div className="bg-gray-100 p-8 rounded-[2rem] text-center">
                      <span className="text-4xl grayscale opacity-50 block mb-3">🧾</span>
-                     <p className="text-gray-500 font-bold">Aún no hay visitas pagadas.</p>
+                     <p className="text-gray-500 font-bold">Aún no hay visitas pagadas en tu historial.</p>
                   </div>
                ) : (
                   <div className="space-y-4">
@@ -208,8 +266,8 @@
                              </div>
                              <ul className="text-sm text-gray-700 space-y-2">
                                {h.items.map((item, idx) => (
-                                 <li key={idx} className="flex gap-3 font-bold items-center">
-                                    <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded-lg text-xs">{item.cantidad}x</span>
+                                 <li key={idx} className="flex gap-3 font-medium items-center">
+                                    <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded-lg text-xs font-black">{item.cantidad}x</span>
                                     {item.producto?.nombre}
                                  </li>
                                ))}
@@ -217,6 +275,9 @@
                            </div>
                         );
                      })}
+                     <button onClick={borrarHistorial} className="w-full mt-6 bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl active:bg-gray-200 transition-colors">
+                       Limpiar historial
+                     </button>
                   </div>
                )}
             </div>
@@ -229,7 +290,7 @@
               <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
                 <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
                 <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">{authMode === 'login' ? 'Hola' : 'Únete'}</h3>
-                <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta.' : 'Crea tu cuenta para ganar puntos.'}</p>
+                <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta Bokalia.' : 'Crea tu cuenta para ganar puntos.'}</p>
                 <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
                 <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
                 <button onClick={handleAuth} className={`w-full text-white font-black py-5 rounded-2xl text-xl active:scale-95 transition-transform mb-4 shadow-lg ${authMode === 'login' ? 'bg-red-600 shadow-red-600/30' : 'bg-yellow-400 text-yellow-900 shadow-yellow-400/50'}`}>
@@ -238,6 +299,38 @@
                 <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-gray-500 font-bold py-3">{authMode === 'login' ? 'No tengo cuenta, crear una' : 'Ya tengo cuenta, iniciar sesión'}</button>
               </div>
             </div>
+          )}
+
+          {/* TUTORIAL INSTALAR APP */}
+          {showInstallTutorial && (
+             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-end justify-center p-0 animate-fade-in">
+                <div className="bg-white w-full max-w-md rounded-t-[2.5rem] p-8 text-center shadow-2xl relative animate-slide-up border-t-8 border-red-600">
+                   <button onClick={() => setShowInstallTutorial(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center active:bg-gray-200">✕</button>
+                   
+                   <div className="text-6xl mb-4 mt-2">📲</div>
+                   <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">Añádenos a tu móvil</h3>
+                   <p className="text-gray-500 font-medium mb-8 text-sm">Instala la App de Bokalia en tu pantalla de inicio para entrar más rápido.</p>
+                   
+                   <div className="bg-gray-50 p-5 rounded-2xl text-left text-sm font-bold text-gray-700 space-y-4 mb-8 border border-gray-200 shadow-inner">
+                      <p className="flex items-start gap-3">
+                        <span className="text-xl">1️⃣</span> 
+                        <span className="mt-1">Toca <b>Compartir</b> en iPhone (cuadrado con flecha) o los <b>3 puntitos</b> en Android.</span>
+                      </p>
+                      <p className="flex items-center gap-3">
+                        <span className="text-xl">2️⃣</span> 
+                        <span>Desliza por el menú de opciones.</span>
+                      </p>
+                      <p className="flex items-start gap-3">
+                        <span className="text-xl">3️⃣</span> 
+                        <span className="mt-1">Toca <b>Añadir a pantalla de inicio</b> ➕.</span>
+                      </p>
+                   </div>
+
+                   <button onClick={() => setShowInstallTutorial(false)} className="w-full bg-red-100 text-red-600 font-black py-4 rounded-2xl text-lg active:scale-95 transition-transform">
+                      Entendido
+                   </button>
+                </div>
+             </div>
           )}
 
         </div>
