@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Bokalia - Pide desde tu mesa</title>
+  <title>Bokalia - Pedidos en Mesa</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -16,7 +16,7 @@
     @keyframes slideUp { from { transform: translate3d(0, 100%, 0); } to { transform: translate3d(0, 0, 0); } }
     .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     @keyframes fadeIn { from { opacity: 0; transform: translate3d(0, -10px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
-    .animate-fade-in { animation: fadeIn 0.25s ease forwards; }
+    .animate-fade-in { animation: fadeIn 0.2s ease forwards; }
     .mobile-container { transform: translate(0); }
   </style>
 </head>
@@ -33,7 +33,7 @@
     const { useState, useEffect, useRef } = React;
     const TIEMPO_LIMITE_MINUTOS = 120; // 2 Horas
 
-    // 🔥 EL ID DE TU RESTAURANTE (Bokalia)
+    // 🔥 PON AQUÍ EL ID DE TU RESTAURANTE 🔥
     const RESTAURANTE_ID = 'a5f65b60-0a06-4ed3-9c40-fbbf5f85901a';
 
     class ErrorBoundary extends React.Component {
@@ -45,7 +45,7 @@
               <div className="text-6xl mb-4">🚨</div>
               <h1 className="text-2xl font-black text-red-600 mb-2">Error Crítico</h1>
               <p className="text-gray-700 text-sm mb-6">{this.state.error.toString()}</p>
-              <button onClick={() => window.location.href='perfil.html'} className="bg-red-600 text-white font-bold py-3 px-6 rounded-xl">Volver al Inicio</button>
+              <button onClick={() => window.location.reload()} className="bg-red-600 text-white font-bold py-3 px-6 rounded-xl">Recargar App</button>
             </div>
         );
         return this.props.children;
@@ -59,6 +59,7 @@
     );
 
     function MainApp() {
+      // ESTADOS PRINCIPALES
       const [mesaParam, setMesaParam] = useState(null);
       const [user, setUser] = useState(null);
       const [authLoading, setAuthLoading] = useState(true);
@@ -68,15 +69,15 @@
       const [mesaBloqueada, setMesaBloqueada] = useState(false);
       const [hostName, setHostName] = useState('');
       
+      const [carrito, setCarrito] = useState([]); // CARRITO LOCAL (Rápido y sin bugs)
       const [carritosAmigos, setCarritosAmigos] = useState({}); 
-      const [rondasBorrador, setRondasBorrador] = useState([]); 
       const [rondasEnviadas, setRondasEnviadas] = useState([]); 
       
       const [ultimoPedido, setUltimoPedido] = useState(null);
       const [ultimaActividad, setUltimaActividad] = useState(Date.now());
       const [productoPendiente, setProductoPendiente] = useState(null);
       
-      // Modales
+      // MODALES UI
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('login'); 
       const [email, setEmail] = useState('');
@@ -94,7 +95,7 @@
       const channelRef = useRef(null);
       const ticketProcesadoRef = useRef(false);
 
-      // INICIALIZACIÓN
+      // 1. INICIALIZACIÓN
       useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const mesa = urlParams.get('mesa');
@@ -115,7 +116,7 @@
         return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
       }, []);
 
-      // VIGILANTE MESA GLOBAL
+      // 2. VIGILANTE DE MESA
       useEffect(() => {
         if (!mesaParam || authLoading) return;
         verificarSesionMesa();
@@ -130,7 +131,7 @@
         return () => supabase.removeChannel(globalChannel);
       }, [mesaParam, user, authLoading, sesionActiva]);
 
-      // VIGILANTE CARRITOS Y COBROS
+      // 3. VIGILANTE DE AMIGOS Y PEDIDOS
       useEffect(() => {
         if (sesionActiva) {
           cargarRondasMesa(sesionActiva.id);
@@ -150,11 +151,8 @@
                cargarRondasMesa(sesionActiva.id);
                setUltimaActividad(Date.now());
             })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'items_pedido' }, () => {
-               cargarRondasMesa(sesionActiva.id);
-            })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sesiones_mesa', filter: `id=eq.${sesionActiva.id}` }, (payload) => {
-               // 🔥 SI EL CAMARERO COBRA, ENSEÑAMOS EL TICKET
+               // 🔥 EL IPAD ACABA DE MARCAR LA MESA COMO PAGADA
                if (payload.new.estado === 'pagada') {
                   cargarTicketFinal(sesionActiva.id);
                }
@@ -171,7 +169,7 @@
             if (!sesionActiva) {
                setShowModoMesa(true);
             } else {
-               ejecutarAñadirDB(sesionActiva.id, productoPendiente);
+               añadirAlCarritoLocal(productoPendiente);
                setProductoPendiente(null);
             }
          }
@@ -189,7 +187,7 @@
         return () => clearInterval(interval);
       }, [sesionActiva, ultimaActividad, showTimeoutModal]);
 
-      // --- FUNCIONES ---
+      // --- FUNCIONES CORE ---
       const procesarUsuario = async (authUser) => {
         setUser(authUser);
         try {
@@ -201,8 +199,7 @@
       };
 
       const cargarMenu = async () => {
-        // 🔥 Carga los productos reales de TU restaurante
-        const { data, error } = await supabase.from('productos').select('*').eq('restaurante_id', RESTAURANTE_ID).eq('activo', true);
+        const { data } = await supabase.from('productos').select('*').eq('restaurante_id', RESTAURANTE_ID).eq('activo', true);
         if (data) setProductos(data);
       };
 
@@ -253,16 +250,11 @@
       };
 
       const cargarRondasMesa = async (idSesion) => {
-        const { data, error } = await supabase.from('pedidos_rondas')
+        const { data } = await supabase.from('pedidos_rondas')
           .select('*, items:items_pedido(id, cantidad, precio_unitario, producto_id, producto:productos(nombre, precio)), usuario:usuarios(nombre, email)')
-          .eq('sesion_id', idSesion).order('fecha', { ascending: true });
+          .eq('sesion_id', idSesion).neq('estado', 'pendiente').order('fecha', { ascending: true });
           
-        if (data) {
-           const borradores = data.filter(r => (r.estado === 'pendiente' || r.estado === 'listo') && r.items.length > 0);
-           setRondasBorrador(borradores);
-           const enviados = data.filter(r => r.estado === 'enviado' || r.estado === 'preparando' || r.estado === 'servido');
-           setRondasEnviadas(enviados);
-        }
+        if (data) setRondasEnviadas(data);
       };
 
       const handleAuth = async () => {
@@ -272,7 +264,7 @@
         else setShowAuthModal(false); 
       };
 
-      // 🍔 AÑADIR A DB
+      // 🍔 CARRITO LOCAL INSTANTÁNEO (Lo que funcionaba genial)
       const intentarAñadirAlCarrito = (producto) => {
         if (!user) { 
            setProductoPendiente(producto);
@@ -283,32 +275,33 @@
            setProductoPendiente(producto);
            return setShowModoMesa(true);
         }
-        ejecutarAñadirDB(sesionActiva.id, producto);
+        añadirAlCarritoLocal(producto);
       };
 
-      const ejecutarAñadirDB = async (idSesion, producto) => {
-         try {
-            let { data: ronda } = await supabase.from('pedidos_rondas')
-               .select('id, estado').eq('sesion_id', idSesion).eq('usuario_id', user.id).in('estado', ['pendiente', 'listo']).maybeSingle();
-
-            if (!ronda) {
-               const { data: newRonda } = await supabase.from('pedidos_rondas')
-                  .insert([{ sesion_id: idSesion, usuario_id: user.id, estado: 'pendiente' }]).select().single();
-               ronda = newRonda;
-            } else if (ronda.estado === 'listo') {
-               await supabase.from('pedidos_rondas').update({ estado: 'pendiente' }).eq('id', ronda.id);
-            }
-            
-            await supabase.from('items_pedido').insert([{
-               ronda_id: ronda.id, producto_id: producto.id, cantidad: 1, precio_unitario: producto.precio
-            }]);
-            
-            mostrarToast(`Añadido: ${producto.nombre} 🛒`);
-         } catch(e) { console.error("Error al añadir:", e); }
+      const añadirAlCarritoLocal = (producto) => {
+         const nuevoCarrito = [...carrito, { ...producto, idUnico: Math.random() }];
+         setCarrito(nuevoCarrito);
+         setUltimaActividad(Date.now());
+         mostrarToast(`Añadido: ${producto.nombre} 🛒`);
+         
+         if (channelRef.current && sesionActiva) {
+            channelRef.current.send({
+               type: 'broadcast', event: 'cart_sync',
+               payload: { userId: user.id, userName: user.email?.split('@')[0] || 'Amigo', cart: nuevoCarrito }
+            });
+         }
       };
 
-      const eliminarItemBorrador = async (itemId) => {
-         await supabase.from('items_pedido').delete().eq('id', itemId);
+      const eliminarItemCarritoLocal = (idUnico) => {
+         const nuevoCarrito = carrito.filter(item => item.idUnico !== idUnico);
+         setCarrito(nuevoCarrito);
+         
+         if (channelRef.current && sesionActiva) {
+            channelRef.current.send({
+               type: 'broadcast', event: 'cart_sync',
+               payload: { userId: user.id, userName: user.email?.split('@')[0] || 'Amigo', cart: nuevoCarrito }
+            });
+         }
       };
 
       const procesarCrearMesaYPedir = async (esCompartida) => {
@@ -318,25 +311,43 @@
               restaurante_id: RESTAURANTE_ID, num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida 
            }]).select().single();
            setSesionActiva(data);
+           // Efecto Memoria lo captura y añade
         } catch(e) { console.error(e); }
       };
 
-      const enviarACocinaDB = async () => {
-         if (!sesionActiva || !user) return;
-         const miRonda = rondasBorrador.find(r => r.usuario_id === user.id);
-         if (!miRonda) return;
+      // 🍔 MANDAR TODO DEL TIRÓN A COCINA
+      const enviarACocina = async () => {
+         if (!sesionActiva || !user || carrito.length === 0) return;
 
          try {
-            await supabase.from('pedidos_rondas').update({estado: 'listo'}).eq('id', miRonda.id);
-            const { data: pendientes } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', sesionActiva.id).eq('estado', 'pendiente');
-               
-            if (pendientes && pendientes.length > 0) {
-               mostrarToast("¡Estás listo! Esperando a tus amigos... ⏳");
-            } else {
-               await supabase.from('pedidos_rondas').update({estado: 'enviado', fecha: new Date().toISOString()}).eq('sesion_id', sesionActiva.id).eq('estado', 'listo');
-               mostrarToast("¡Ronda grupal a cocina! 🚀");
+            // Creamos la ronda
+            const { data: ronda, error: errRonda } = await supabase.from('pedidos_rondas')
+               .insert([{ sesion_id: sesionActiva.id, usuario_id: user.id, estado: 'enviado', fecha: new Date().toISOString() }])
+               .select().single();
+
+            if (errRonda) throw errRonda;
+
+            // Agrupamos el carrito local
+            const conteo = {};
+            carrito.forEach(p => { conteo[p.id] = (conteo[p.id] || 0) + 1; });
+            const itemsInsert = Object.keys(conteo).map(id => ({
+              ronda_id: ronda.id, producto_id: id, cantidad: conteo[id], precio_unitario: carrito.find(p => p.id === id).precio
+            }));
+            
+            await supabase.from('items_pedido').insert(itemsInsert);
+            
+            // Limpiamos carrito local y avisamos a amigos
+            setCarrito([]);
+            if (channelRef.current) {
+               channelRef.current.send({ type: 'broadcast', event: 'cart_sync', payload: { userId: user.id, userName: '', cart: [] } });
             }
-         } catch(e) { console.error(e); }
+            
+            cargarRondasMesa(sesionActiva.id);
+            mostrarToast("¡Enviado a cocina! 🚀");
+         } catch(e) { 
+            console.error(e);
+            alert("Error al enviar. Asegúrate de estar conectado."); 
+         }
       };
 
       const pedirCuenta = async () => {
@@ -345,7 +356,7 @@
         mostrarToast("El camarero trae la cuenta. ¡Avisado! 💸");
       };
 
-      // 🧾 CARGAR TICKET FINAL (Solo lee datos visuales, los puntos reales los puso el Trigger SQL)
+      // 🧾 CARGAR TICKET FINAL Y PUNTOS (Seguro)
       const cargarTicketFinal = async (idSesion) => {
          if (ticketProcesadoRef.current) return;
          ticketProcesadoRef.current = true;
@@ -368,17 +379,28 @@
                }
             }
             
-            // Esto es solo para que el cliente lo vea en el ticket, los de verdad ya están en su cuenta.
+            // LA NUEVA REGLA MATEMÁTICA: 1 Euro = 100 Puntos
             const puntosGanadosVisuales = Math.floor(totalGastado * 100);
+
+            // SUMAMOS LOS PUNTOS DESDE EL MÓVIL AL PERFIL
+            if (puntosGanadosVisuales > 0 && user) {
+               const { data: ptData } = await supabase.from('puntos_fidelizacion').select('puntos').eq('usuario_id', user.id).eq('restaurante_id', RESTAURANTE_ID).maybeSingle();
+               
+               const puntosActuales = parseInt(ptData?.puntos) || 0;
+               
+               await supabase.from('puntos_fidelizacion')
+                  .upsert({ usuario_id: user.id, restaurante_id: RESTAURANTE_ID, puntos: puntosActuales + puntosGanadosVisuales }, { onConflict: 'usuario_id,restaurante_id' });
+            }
 
             setDatosTicket({ subtotal: totalGastado, puntosGanados: puntosGanadosVisuales, items: misItems });
             setShowTicketModal(true);
          } catch (e) {
+            console.error("Fallo ticket:", e);
             setShowReviewModal(true); 
          }
       };
 
-      // 🔥 REDIRECCIÓN INQUEBRANTABLE AL PERFIL AL TERMINAR
+      // 🔥 REDIRECCIÓN INFALIBLE AL PERFIL AL TERMINAR
       const finalizarYSalir = () => {
          window.location.href = 'perfil.html'; 
       };
@@ -388,7 +410,7 @@
         const d = new Date(dateStr);
         return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
       };
-      const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
+      const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
 
       // ==========================================
       // UI Y VISTAS
@@ -424,13 +446,10 @@
               }} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-[2rem] text-2xl shadow-xl">
               Empezar
             </button>
-            <button onClick={() => window.location.href='perfil.html'} className="mt-8 text-gray-500 font-bold">Ir a mi Perfil</button>
+            <button onClick={() => window.location.href='perfil.html'} className="mt-8 text-gray-500 font-bold">Ir a mi Perfil Bokalia</button>
           </div>
         </div>
       );
-
-      const miRondaBorrador = rondasBorrador.find(r => r.usuario_id === user?.id);
-      const totalItemsMesaPendiente = rondasBorrador.reduce((acc, r) => acc + r.items.length, 0);
 
       const totalMesaEnviada = rondasEnviadas.reduce((acc, r) => {
          return acc + r.items.reduce((sum, item) => sum + (parseFloat(item.precio_unitario) * parseInt(item.cantidad)), 0);
@@ -473,31 +492,39 @@
 
           <div className="p-4">
             
-            {rondasBorrador.length > 0 && (
+            {/* 🛒 BORRADOR DE LA MESA (Carritos de amigos y el tuyo) */}
+            {(carrito.length > 0 || Object.keys(carritosAmigos).length > 0) && (
               <div className="mb-10 bg-orange-50 p-5 rounded-[2rem] border-2 border-orange-200 shadow-md animate-fade-in">
                 <h2 className="text-xl font-black text-orange-900 mb-4 flex items-center gap-2">
                   <span className="w-2.5 h-2.5 bg-orange-500 rounded-full animate-ping"></span>
                   Borrador de la Mesa
                 </h2>
                 
-                {rondasBorrador.map(ronda => (
-                   <div key={ronda.id} className={`mb-4 last:mb-0 ${ronda.usuario_id !== user?.id ? 'opacity-80' : ''}`}>
-                     <div className="flex justify-between items-end border-b border-orange-200 pb-1 mb-2">
-                        <p className="text-xs font-bold text-orange-700 uppercase tracking-widest">
-                           {ronda.usuario_id === user?.id ? 'Tú vas a pedir:' : `${ronda.usuario?.nombre || ronda.usuario?.email?.split('@')[0]} va a pedir:`}
-                        </p>
-                        {ronda.estado === 'listo' && <span className="text-[10px] font-black bg-green-500 text-white px-2 py-0.5 rounded-full uppercase">¡Listo! ✅</span>}
-                     </div>
+                {carrito.length > 0 && (
+                   <div className="mb-4">
+                     <p className="text-xs font-bold text-orange-700 uppercase tracking-widest border-b border-orange-200 pb-1 mb-2">Tú vas a pedir:</p>
                      <ul className="space-y-2">
-                        {ronda.items.map(item => (
-                           <li key={item.id} className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm">
+                        {carrito.map(item => (
+                           <li key={item.idUnico} className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm">
                               <div className="flex gap-3 items-center text-sm font-bold text-gray-800">
-                                 <span className="bg-orange-100 text-orange-600 w-6 h-6 flex items-center justify-center rounded-md">{item.cantidad}x</span>
-                                 {item.producto?.nombre}
+                                 <span className="text-orange-600">🍔</span> {item.nombre}
                               </div>
-                              {ronda.usuario_id === user?.id && ronda.estado === 'pendiente' && (
-                                 <button onClick={() => eliminarItemBorrador(item.id)} className="bg-red-50 text-red-600 p-2 rounded-lg font-black text-xs active:scale-95 transition-all">QUITAR</button>
-                              )}
+                              <button onClick={() => eliminarItemCarritoLocal(item.idUnico)} className="bg-red-50 text-red-600 p-2 rounded-lg font-black text-xs active:scale-95 transition-all">QUITAR</button>
+                           </li>
+                        ))}
+                     </ul>
+                   </div>
+                )}
+
+                {Object.values(carritosAmigos).map(amigo => (
+                   <div key={amigo.userId} className="mb-4 opacity-80">
+                     <p className="text-xs font-bold text-orange-700 uppercase tracking-widest border-b border-orange-200 pb-1 mb-2">{amigo.userName} va a pedir:</p>
+                     <ul className="space-y-2">
+                        {amigo.cart.map(item => (
+                           <li key={item.idUnico} className="flex justify-between items-center bg-white/50 p-3 rounded-xl shadow-sm">
+                              <div className="flex gap-3 items-center text-sm font-bold text-gray-700">
+                                 <span>🛒</span> {item.nombre}
+                              </div>
                            </li>
                         ))}
                      </ul>
@@ -521,7 +548,6 @@
             )}
 
             <h2 className="text-2xl font-black text-gray-800 mb-4 ml-1 tracking-tight">La Carta</h2>
-            {productos.length === 0 && <p className="text-gray-500 text-sm font-bold ml-2">Menú no disponible.</p>}
             
             <div className="grid grid-cols-2 gap-4 mb-8">
               {productos.map(p => (
@@ -579,24 +605,22 @@
             )}
           </div>
 
-          {totalItemsMesaPendiente > 0 && !mesaBloqueada && (
+          {carrito.length > 0 && !mesaBloqueada && (
             <div className="fixed bottom-0 left-0 w-full bg-white p-5 shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.15)] z-20 animate-slide-up rounded-t-[2.5rem]">
               <div className="flex justify-between items-center max-w-md mx-auto">
                 <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Mesa pendiente</p>
-                  <p className="text-3xl font-black text-gray-800 tracking-tighter">{totalItemsMesaPendiente} <span className="text-base font-bold text-gray-500">ítems</span></p>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tu borrador</p>
+                  <p className="text-3xl font-black text-gray-800 tracking-tighter">{carrito.length} <span className="text-base font-bold text-gray-500">ítems</span></p>
                 </div>
                 <button 
-                  onClick={enviarACocinaDB} 
-                  disabled={miRondaBorrador?.estado === 'listo'}
-                  className={`font-black py-4 px-6 rounded-2xl shadow-[0_8px_20px_rgba(0,0,0,0.1)] text-lg flex items-center gap-2 transition-transform ${miRondaBorrador?.estado === 'listo' ? 'bg-gray-200 text-gray-500' : 'bg-green-500 text-white active:scale-95 shadow-green-500/40'}`}>
-                  {miRondaBorrador?.estado === 'listo' ? 'Esperando amigos ⏳' : 'Mandar a cocina'}
+                  onClick={enviarACocina} 
+                  className="font-black py-4 px-6 rounded-2xl shadow-[0_8px_20px_rgba(34,197,94,0.4)] text-lg flex items-center gap-2 transition-transform bg-green-500 text-white active:scale-95">
+                  Mandar a cocina
                 </button>
               </div>
             </div>
           )}
 
-          {/* MODALES ABSOLUTES */}
           {showAuthModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
               <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
@@ -672,29 +696,32 @@
           )}
 
           {showTimeoutModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[120] flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up">
                 <div className="text-6xl mb-4">👀</div>
                 <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Sigues ahí?</h3>
                 <p className="text-sm text-gray-500 mb-8 font-medium">Llevas un tiempo sin pedir nada en la mesa.</p>
                 <button onClick={() => { setUltimaActividad(Date.now()); setShowTimeoutModal(false); }} className="w-full bg-green-500 text-white font-black py-5 rounded-2xl shadow-xl mb-4 text-xl">Sí, sigo aquí</button>
-                <button onClick={finalizarYSalir} className="w-full bg-red-100 text-red-600 font-black py-5 rounded-2xl text-xl">No, ya me he ido</button>
+                <button onClick={() => {
+                   setShowTimeoutModal(false);
+                   window.location.href = 'perfil.html'; 
+                }} className="w-full bg-red-100 text-red-600 font-black py-5 rounded-2xl text-xl">No, ya me he ido</button>
               </div>
             </div>
           )}
           
           {showReviewModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[130] flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up">
                 <div className="text-5xl mb-4">⭐</div>
                 <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Qué tal la comida?</h3>
                 <p className="text-sm text-gray-500 mb-8 font-medium">Toca las estrellas para valorarnos.</p>
                 <div className="flex justify-center gap-3 mb-10">
                   {[1,2,3,4,5].map(star => (
-                    <button key={star} onClick={() => { window.open('https://maps.google.com', '_blank'); finalizarYSalir(); }} className="text-5xl text-yellow-400 active:scale-75 transition-transform">★</button>
+                    <button key={star} onClick={() => { window.location.href = 'perfil.html'; }} className="text-5xl text-yellow-400 active:scale-75 transition-transform">★</button>
                   ))}
                 </div>
-                <button onClick={finalizarYSalir} className="text-sm font-bold text-gray-400 uppercase tracking-widest">Saltar y Salir</button>
+                <button onClick={() => { window.location.href = 'perfil.html'; }} className="text-sm font-bold text-gray-400 uppercase tracking-widest">Saltar y Salir</button>
               </div>
             </div>
           )}
