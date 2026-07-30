@@ -34,17 +34,16 @@
 
     function CajaPanel() {
       const [mesas, setMesas] = useState([]);
-      const [conexionDb, setConexionDb] = useState('conectando'); // conectando | conectado | desconectado
+      const [conexionDb, setConexionDb] = useState('conectando'); 
       const [audioUnlock, setAudioUnlock] = useState(false);
       
       const audioCtxRef = useRef(null);
       const intervalRef = useRef(null);
 
-      // 1. INICIALIZAR SISTEMA Y AUDIO
+      // 1. INICIALIZAR SISTEMA Y AUDIO (Para engañar a Apple y que deje sonar el iPad)
       const inicializarSistema = () => {
          const AudioContext = window.AudioContext || window.webkitAudioContext;
          audioCtxRef.current = new AudioContext();
-         // Silencio inicial para desbloquear autoplay en iPad
          const osc = audioCtxRef.current.createOscillator();
          osc.connect(audioCtxRef.current.destination);
          osc.start();
@@ -62,15 +61,15 @@
          gainNode.connect(audioCtxRef.current.destination);
          
          osc.type = 'sine';
-         osc.frequency.setValueAtTime(880, audioCtxRef.current.currentTime); // Frecuencia de campana
-         gainNode.gain.setValueAtTime(0.1, audioCtxRef.current.currentTime);
+         osc.frequency.setValueAtTime(880, audioCtxRef.current.currentTime); 
+         gainNode.gain.setValueAtTime(0.2, audioCtxRef.current.currentTime);
          
          osc.start();
          gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtxRef.current.currentTime + 0.5);
          osc.stop(audioCtxRef.current.currentTime + 0.5);
       };
 
-      // 3. CARGAR MESAS (CON DESGLOSE TRICOUNT)
+      // 3. CARGAR MESAS
       const cargarMesasActivas = async () => {
          try {
             const { data, error } = await supabase.from('sesiones_mesa')
@@ -86,13 +85,12 @@
                
             if (error) throw error;
             
-            // Procesamos el Desglose Tricount para cada mesa
             const mesasProcesadas = data.map(mesa => {
                const usuariosMap = {};
                let totalMesa = 0;
                
                mesa.rondas.forEach(ronda => {
-                  if (ronda.estado === 'pendiente') return; // No cobramos lo no enviado
+                  if (ronda.estado === 'pendiente') return; 
                   
                   const userId = ronda.usuario_id;
                   const userName = ronda.usuario?.nombre || ronda.usuario?.email?.split('@')[0] || 'Cliente';
@@ -137,7 +135,6 @@
                else setConexionDb('desconectado');
             });
 
-         // Loop de reconexión si se cae
          const reconexionInterval = setInterval(() => {
             if (conexionDb === 'desconectado') cargarMesasActivas();
          }, 5000);
@@ -148,7 +145,7 @@
          };
       }, [audioUnlock, conexionDb]);
 
-      // 5. CONTROLADOR DE LA ALARMA SONORA EN BUCLE (CADA 5 SEG)
+      // 5. CONTROLADOR DEL SONIDO (CADA 5 SEG)
       useEffect(() => {
          const hayMesaPagando = mesas.some(m => m.estado === 'pagando');
          
@@ -161,34 +158,44 @@
          }
       }, [mesas]);
 
-      // 6. BOTÓN MAESTRO: CUENTA PAGADA
+      // 6. BOTÓN MAESTRO: CUENTA PAGADA (CON CAZADOR DE ERRORES ESTRICTO)
       const handleCompleteTable = async (mesa) => {
          try {
-            // A) Parar sonido implícitamente al cambiar el estado
+            // Detenemos el sonido temporalmente
+            if (intervalRef.current) {
+               clearInterval(intervalRef.current);
+               intervalRef.current = null;
+            }
+
+            // Paso A: Cambiamos estado de la mesa en la base de datos
+            const { error: errMesa } = await supabase.from('sesiones_mesa').update({ estado: 'pagada' }).eq('id', mesa.id);
+            if (errMesa) throw new Error("Fallo al actualizar la mesa: " + errMesa.message);
             
-            // B) Cambiar estado a 'pagada' (COMPLETADA)
-            await supabase.from('sesiones_mesa').update({ estado: 'pagada' }).eq('id', mesa.id);
-            
-            // C) Algoritmo de Reparto de Puntos (Math.floor(Subtotal))
+            // Paso B: Reparto de puntos
             for (const userId of Object.keys(mesa.desglose)) {
                const subtotal = mesa.desglose[userId].subtotal;
-               const puntosGanados = Math.floor(subtotal); // Fórmula estricta requerida
+               const puntosGanados = Math.floor(subtotal * 20); // 20 Puntos por euro (Lo he igualado a como estaba en la app)
                
                if (puntosGanados > 0) {
-                  const { data: usr } = await supabase.from('usuarios').select('puntos').eq('id', userId).single();
-                  await supabase.from('usuarios').update({ puntos: (usr?.puntos || 0) + puntosGanados }).eq('id', userId);
+                  const { data: usr, error: errUsr } = await supabase.from('usuarios').select('puntos').eq('id', userId).single();
+                  if (!errUsr) {
+                      await supabase.from('usuarios').update({ puntos: (usr?.puntos || 0) + puntosGanados }).eq('id', userId);
+                  }
                }
             }
             
-            // D) Activar Trigger de Reseñas Diferido (5 min en el futuro)
+            // Paso C: Disparamos el contador de Reseñas de 5 minutos en el backend
             const programadoPara = new Date(Date.now() + 5 * 60000).toISOString();
-            await supabase.from('resenas_pendientes').insert([{ sesion_id: mesa.id, programado_para: programadoPara }]);
+            const { error: errResena } = await supabase.from('resenas_pendientes').insert([{ sesion_id: mesa.id, programado_para: programadoPara }]);
+            if (errResena) console.warn("Aviso (No crítico): Falló el trigger de reseñas -> " + errResena.message);
             
-            // E) Limpiar UI
+            // Paso D: Limpiamos la mesa del iPad
             setMesas(mesas.filter(m => m.id !== mesa.id));
+            alert("✅ ¡MESA COBRADA! Puntos repartidos a los clientes.");
             
          } catch (error) {
-            alert("Error al cerrar la mesa: " + error.message);
+            // SI ALGO FALLA, SALTA ESTE ERROR ROJO:
+            alert("❌ ERROR AL COBRAR: " + error.message);
          }
       };
 
@@ -207,7 +214,6 @@
 
       return (
          <div className="min-h-screen bg-gray-100 flex flex-col">
-            {/* TOP BAR */}
             <header className="bg-gray-900 text-white p-6 shadow-md flex justify-between items-center">
                <div className="flex items-center gap-4">
                   <h1 className="text-2xl font-black tracking-widest text-yellow-400">BOKALIA CAJA</h1>
@@ -222,7 +228,6 @@
                </div>
             </header>
 
-            {/* CONTENIDO PRINCIPAL (GRID) */}
             <main className="p-6 flex-grow">
                <div className="flex items-center justify-between mb-8">
                   <h2 className="text-xl font-black text-gray-800">Mesas en Sala ({mesas.length})</h2>
@@ -241,7 +246,6 @@
                      {mesas.sort((a,b) => (a.estado === 'pagando' ? -1 : 1)).map(mesa => (
                         <div key={mesa.id} className={`bg-white rounded-3xl overflow-hidden shadow-lg border-4 transition-all duration-300 ${mesa.estado === 'pagando' ? 'animate-blink bg-amber-50' : 'border-transparent'}`}>
                            
-                           {/* HEADER TARJETA */}
                            <div className={`p-5 flex justify-between items-center ${mesa.estado === 'pagando' ? 'bg-amber-500 text-white' : 'bg-gray-100'}`}>
                               <h3 className="text-2xl font-black">Mesa {mesa.num_mesa}</h3>
                               <span className={`px-3 py-1 text-xs font-black uppercase rounded-lg tracking-widest ${mesa.estado === 'pagando' ? 'bg-red-600 text-white shadow-md' : 'bg-green-200 text-green-800'}`}>
@@ -249,7 +253,6 @@
                               </span>
                            </div>
 
-                           {/* CUERPO TRICOUNT */}
                            <div className="p-5">
                               {Object.keys(mesa.desglose).length === 0 ? (
                                  <p className="text-gray-400 text-sm font-medium py-4 text-center">Sin pedidos confirmados aún.</p>
@@ -274,7 +277,6 @@
                               )}
                            </div>
 
-                           {/* FOOTER TOTAL Y COBRO */}
                            <div className="p-5 bg-gray-50 border-t border-gray-100">
                               <div className="flex justify-between items-end mb-4">
                                  <span className="text-gray-500 font-bold uppercase text-xs tracking-widest">Total Consolidado</span>
