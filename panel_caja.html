@@ -35,41 +35,34 @@
     function CajaPanel() {
       const [mesas, setMesas] = useState([]);
       const [conexionDb, setConexionDb] = useState('conectando'); 
-      const [audioUnlock, setAudioUnlock] = useState(false);
+      const [notifPerm, setNotifPerm] = useState('default');
       
-      const audioCtxRef = useRef(null);
-      const intervalRef = useRef(null);
+      // Para no enviar 20 notificaciones de la misma mesa, guardamos memoria de a quién hemos avisado
+      const mesasNotificadas = useRef(new Set());
 
-      // 1. INICIALIZAR SISTEMA Y AUDIO (Para engañar a Apple y que deje sonar el iPad)
-      const inicializarSistema = () => {
-         const AudioContext = window.AudioContext || window.webkitAudioContext;
-         audioCtxRef.current = new AudioContext();
-         const osc = audioCtxRef.current.createOscillator();
-         osc.connect(audioCtxRef.current.destination);
-         osc.start();
-         osc.stop(audioCtxRef.current.currentTime + 0.01);
-         setAudioUnlock(true);
+      // 1. INICIALIZAR Y PEDIR PERMISOS
+      useEffect(() => {
+         if ('Notification' in window) {
+            setNotifPerm(Notification.permission);
+         }
+      }, []);
+
+      const pedirNotificaciones = async () => {
+         if (!('Notification' in window)) {
+            alert("Tu dispositivo no soporta notificaciones nativas.");
+            return;
+         }
+         try {
+            const permission = await Notification.requestPermission();
+            setNotifPerm(permission);
+            if (permission === 'granted') alert("¡Notificaciones de Barra activadas! 🔔");
+            else alert("Avisos bloqueados. Actívalos en los Ajustes del dispositivo.");
+         } catch (error) {
+            console.error("Error al pedir notificaciones:", error);
+         }
       };
 
-      // 2. FUNCIÓN DE ALARMA SONORA (Ding)
-      const playBeep = () => {
-         if (!audioCtxRef.current || audioCtxRef.current.state !== 'running') return;
-         const osc = audioCtxRef.current.createOscillator();
-         const gainNode = audioCtxRef.current.createGain();
-         
-         osc.connect(gainNode);
-         gainNode.connect(audioCtxRef.current.destination);
-         
-         osc.type = 'sine';
-         osc.frequency.setValueAtTime(880, audioCtxRef.current.currentTime); 
-         gainNode.gain.setValueAtTime(0.2, audioCtxRef.current.currentTime);
-         
-         osc.start();
-         gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtxRef.current.currentTime + 0.5);
-         osc.stop(audioCtxRef.current.currentTime + 0.5);
-      };
-
-      // 3. CARGAR MESAS
+      // 2. CARGAR MESAS
       const cargarMesasActivas = async () => {
          try {
             const { data, error } = await supabase.from('sesiones_mesa')
@@ -118,9 +111,8 @@
          }
       };
 
-      // 4. WEBSOCKETS (REALTIME Y RECONEXIÓN)
+      // 3. WEBSOCKETS (REALTIME Y RECONEXIÓN)
       useEffect(() => {
-         if (!audioUnlock) return;
          cargarMesasActivas();
 
          const canalCaja = supabase.channel('caja_sync')
@@ -143,88 +135,66 @@
             supabase.removeChannel(canalCaja);
             clearInterval(reconexionInterval);
          };
-      }, [audioUnlock, conexionDb]);
+      }, [conexionDb]);
 
-      // 5. CONTROLADOR DEL SONIDO (CADA 5 SEG)
+      // 4. CONTROLADOR DE NOTIFICACIONES PUSH
       useEffect(() => {
-         const hayMesaPagando = mesas.some(m => m.estado === 'pagando');
-         
-         if (hayMesaPagando && !intervalRef.current) {
-            playBeep(); // Suena al instante
-            intervalRef.current = setInterval(playBeep, 5000); // Y luego cada 5 seg
-         } else if (!hayMesaPagando && intervalRef.current) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
-         }
-      }, [mesas]);
+         mesas.forEach(mesa => {
+            // Si la mesa pide cuenta y no la habíamos notificado antes
+            if (mesa.estado === 'pagando' && !mesasNotificadas.current.has(mesa.id)) {
+               mesasNotificadas.current.add(mesa.id); // La marcamos como notificada
+               
+               if (notifPerm === 'granted') {
+                  new Notification('🔥 ¡Mesa Pidiendo Cuenta!', {
+                     body: `La Mesa ${mesa.num_mesa} quiere pagar el total de ${Number(mesa.totalConsolidado).toFixed(2)}€.`,
+                     icon: 'https://cdn-icons-png.flaticon.com/512/3514/3514491.png' // Icono genérico de ticket
+                  });
+               }
+            }
+         });
+      }, [mesas, notifPerm]);
 
-      // 6. BOTÓN MAESTRO: CUENTA PAGADA (CON CAZADOR DE ERRORES ESTRICTO)
+      // 5. BOTÓN MAESTRO: CUENTA PAGADA
       const handleCompleteTable = async (mesa) => {
          try {
-            // Detenemos el sonido temporalmente
-            if (intervalRef.current) {
-               clearInterval(intervalRef.current);
-               intervalRef.current = null;
-            }
-
-            // Paso A: Cambiamos estado de la mesa en la base de datos
+            // A: Cambiamos estado de la mesa en la base de datos a pagada
             const { error: errMesa } = await supabase.from('sesiones_mesa').update({ estado: 'pagada' }).eq('id', mesa.id);
             if (errMesa) throw new Error("Fallo al actualizar la mesa: " + errMesa.message);
             
-            // Paso B: Reparto de puntos
-            for (const userId of Object.keys(mesa.desglose)) {
-               const subtotal = mesa.desglose[userId].subtotal;
-               const puntosGanados = Math.floor(subtotal * 20); // 20 Puntos por euro (Lo he igualado a como estaba en la app)
-               
-               if (puntosGanados > 0) {
-                  const { data: usr, error: errUsr } = await supabase.from('usuarios').select('puntos').eq('id', userId).single();
-                  if (!errUsr) {
-                      await supabase.from('usuarios').update({ puntos: (usr?.puntos || 0) + puntosGanados }).eq('id', userId);
-                  }
-               }
-            }
-            
-            // Paso C: Disparamos el contador de Reseñas de 5 minutos en el backend
-            const programadoPara = new Date(Date.now() + 5 * 60000).toISOString();
-            const { error: errResena } = await supabase.from('resenas_pendientes').insert([{ sesion_id: mesa.id, programado_para: programadoPara }]);
-            if (errResena) console.warn("Aviso (No crítico): Falló el trigger de reseñas -> " + errResena.message);
-            
-            // Paso D: Limpiamos la mesa del iPad
+            // B: Limpiar historial visual del iPad y de notificaciones
+            mesasNotificadas.current.delete(mesa.id);
             setMesas(mesas.filter(m => m.id !== mesa.id));
-            alert("✅ ¡MESA COBRADA! Puntos repartidos a los clientes.");
+            
+            // C: Disparamos la petición al cliente para que sepa que ha pagado
+            // (El propio HTML del cliente ahora se encarga de repartirse los puntos)
             
          } catch (error) {
-            // SI ALGO FALLA, SALTA ESTE ERROR ROJO:
             alert("❌ ERROR AL COBRAR: " + error.message);
          }
       };
 
       // --- RENDERIZADO UI ---
-      if (!audioUnlock) {
-         return (
-            <div className="h-screen bg-gray-900 flex flex-col items-center justify-center p-6 text-center">
-               <h1 className="text-4xl font-black text-white mb-4">PANEL DE CAJA BOKALIA</h1>
-               <p className="text-gray-400 mb-8">Pulsa el botón para habilitar las notificaciones sonoras.</p>
-               <button onClick={inicializarSistema} className="bg-red-600 hover:bg-red-700 text-white font-black text-xl py-6 px-12 rounded-3xl shadow-2xl transition-transform active:scale-95">
-                  ▶ INICIALIZAR PANEL
-               </button>
-            </div>
-         );
-      }
-
       return (
          <div className="min-h-screen bg-gray-100 flex flex-col">
             <header className="bg-gray-900 text-white p-6 shadow-md flex justify-between items-center">
                <div className="flex items-center gap-4">
                   <h1 className="text-2xl font-black tracking-widest text-yellow-400">BOKALIA CAJA</h1>
-                  <span className="bg-gray-800 px-3 py-1 rounded-lg text-xs font-bold uppercase border border-gray-700">iPad Barra</span>
+                  <span className="bg-gray-800 px-3 py-1 rounded-lg text-xs font-bold uppercase border border-gray-700">iPad Camarero</span>
                </div>
                
-               <div className="flex items-center gap-2 bg-gray-800 px-4 py-2 rounded-full border border-gray-700">
-                  <span className={`w-3 h-3 rounded-full ${conexionDb === 'conectado' ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-red-500 animate-pulse'}`}></span>
-                  <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">
-                     {conexionDb === 'conectado' ? 'DB Conectada' : 'Reconectando...'}
-                  </span>
+               <div className="flex items-center gap-4">
+                  {notifPerm !== 'granted' && (
+                     <button onClick={pedirNotificaciones} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-sm transition-colors">
+                        🔔 Activar Alertas
+                     </button>
+                  )}
+                  
+                  <div className="flex items-center gap-2 bg-gray-800 px-4 py-2 rounded-full border border-gray-700">
+                     <span className={`w-3 h-3 rounded-full ${conexionDb === 'conectado' ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-red-500 animate-pulse'}`}></span>
+                     <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">
+                        {conexionDb === 'conectado' ? 'En línea' : 'Reconectando...'}
+                     </span>
+                  </div>
                </div>
             </header>
 
@@ -238,8 +208,8 @@
                </div>
 
                {mesas.length === 0 ? (
-                  <div className="h-64 flex items-center justify-center bg-white rounded-3xl border-2 border-dashed border-gray-300">
-                     <p className="text-xl font-bold text-gray-400">No hay mesas activas en sala.</p>
+                  <div className="h-64 flex items-center justify-center bg-white rounded-3xl border-2 border-dashed border-gray-300 shadow-sm">
+                     <p className="text-xl font-bold text-gray-400">Sala libre. No hay mesas abiertas.</p>
                   </div>
                ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
@@ -255,11 +225,11 @@
 
                            <div className="p-5">
                               {Object.keys(mesa.desglose).length === 0 ? (
-                                 <p className="text-gray-400 text-sm font-medium py-4 text-center">Sin pedidos confirmados aún.</p>
+                                 <p className="text-gray-400 text-sm font-medium py-4 text-center">Aún no han pedido nada confirmado.</p>
                               ) : (
                                  <div className="space-y-4">
                                     {Object.values(mesa.desglose).map((user, idx) => (
-                                       <div key={idx} className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                                       <div key={idx} className="bg-gray-50 p-4 rounded-2xl border border-gray-100 shadow-sm">
                                           <div className="flex justify-between items-center mb-2 border-b border-gray-200 pb-2">
                                              <p className="font-black text-gray-700 text-sm uppercase tracking-wider">{user.nombre}</p>
                                              <p className="font-black text-green-600">{Number(user.subtotal).toFixed(2)}€</p>
@@ -267,7 +237,7 @@
                                           <ul className="space-y-1">
                                              {user.items.map((item, i) => (
                                                 <li key={i} className="flex justify-between text-xs text-gray-600 font-medium">
-                                                   <span>{item.cantidad}x {item.producto?.nombre}</span>
+                                                   <span><b className="text-red-500">{item.cantidad}x</b> {item.producto?.nombre}</span>
                                                 </li>
                                              ))}
                                           </ul>
@@ -279,7 +249,7 @@
 
                            <div className="p-5 bg-gray-50 border-t border-gray-100">
                               <div className="flex justify-between items-end mb-4">
-                                 <span className="text-gray-500 font-bold uppercase text-xs tracking-widest">Total Consolidado</span>
+                                 <span className="text-gray-500 font-bold uppercase text-xs tracking-widest">Total a Cobrar</span>
                                  <span className="text-4xl font-black text-gray-900">{Number(mesa.totalConsolidado).toFixed(2)}€</span>
                               </div>
                               
@@ -288,7 +258,7 @@
                                  disabled={mesa.estado !== 'pagando'}
                                  className={`w-full py-4 rounded-2xl font-black text-lg transition-transform ${mesa.estado === 'pagando' ? 'bg-green-500 text-white shadow-lg active:scale-95 hover:bg-green-600' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
                               >
-                                 {mesa.estado === 'pagando' ? '✓ CUENTA PAGADA' : 'Esperando solicitud...'}
+                                 {mesa.estado === 'pagando' ? '✓ MARCAR COMO PAGADA' : 'Esperando solicitud...'}
                               </button>
                            </div>
 
