@@ -72,8 +72,6 @@
       const [mesaBloqueada, setMesaBloqueada] = useState(false);
       const [hostName, setHostName] = useState('');
       
-      const [carrito, setCarrito] = useState([]); 
-      const [carritosAmigos, setCarritosAmigos] = useState({}); 
       const [rondasBorrador, setRondasBorrador] = useState([]); 
       const [rondasEnviadas, setRondasEnviadas] = useState([]); 
       const [historial, setHistorial] = useState([]);
@@ -140,16 +138,6 @@
           cargarRondasMesa(sesionActiva.id);
           
           channelRef.current = supabase.channel(`db_sync_mesa_${sesionActiva.id}`)
-            .on('broadcast', { event: 'cart_sync' }, (payload) => {
-               const data = payload.payload;
-               if (user && data.userId !== user.id) {
-                  setCarritosAmigos(prev => {
-                     const newState = { ...prev, [data.userId]: data };
-                     if (data.cart.length === 0) delete newState[data.userId];
-                     return newState;
-                  });
-               }
-            })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_rondas', filter: `sesion_id=eq.${sesionActiva.id}` }, () => {
                cargarRondasMesa(sesionActiva.id);
                setUltimaActividad(Date.now());
@@ -158,7 +146,6 @@
                cargarRondasMesa(sesionActiva.id);
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sesiones_mesa', filter: `id=eq.${sesionActiva.id}` }, (payload) => {
-               // ✅ EL IPAD DEL CAMARERO DA LA ORDEN, Y EL MÓVIL SACA EL TICKET Y DA LOS PUNTOS
                if (payload.new.estado === 'pagada') {
                   cargarTicketFinal(sesionActiva.id);
                }
@@ -168,17 +155,6 @@
           return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
         }
       }, [sesionActiva, user]);
-
-      useEffect(() => {
-         if (user && productoPendiente && !authLoading) {
-            if (!sesionActiva) {
-               setShowModoMesa(true);
-            } else {
-               ejecutarAñadirDB(sesionActiva.id, productoPendiente);
-               setProductoPendiente(null);
-            }
-         }
-      }, [user, productoPendiente, authLoading, sesionActiva]);
 
       useEffect(() => {
         if (!sesionActiva || sesionActiva.estado === 'pagada') return;
@@ -213,13 +189,14 @@
 
       const pedirNotificaciones = async () => {
         if (!('Notification' in window)) {
-          alert("🍏 Si estás en iPhone: Pulsa 'Compartir' y 'Añadir a la pantalla de inicio'.");
+          alert("🍏 Si estás en iPhone: Pulsa 'Compartir' (el cuadrado con la flecha) y dale a 'Añadir a la pantalla de inicio'.");
           return;
         }
         try {
           const permission = await Notification.requestPermission();
           setNotifPerm(permission);
           if (permission === 'granted' && user) mostrarToast("¡Avisos activados! 🔔");
+          else if (permission === 'denied') alert("Avisos bloqueados. Actívalos en Ajustes.");
         } catch (error) { alert("Añade la web a inicio para recibir avisos."); }
       };
 
@@ -310,13 +287,27 @@
         }
       };
 
+      // AUTH ROBUSTA: Si se loguea y tenía un producto pendiente, pregunta modo mesa o lo añade directo
       const handleAuth = async () => {
         setAuthLoading(true);
         const { error } = authMode === 'register' ? await supabase.auth.signUp({ email, password }) : await supabase.auth.signInWithPassword({ email, password });
-        if (error) { setAuthLoading(false); alert("Error: " + error.message); }
-        else setShowAuthModal(false); 
+        if (error) { 
+           setAuthLoading(false); 
+           alert("Error: " + error.message); 
+        } else { 
+           setShowAuthModal(false); 
+           if (productoPendiente) {
+              if (!sesionActiva) {
+                 setShowModoMesa(true);
+              } else {
+                 ejecutarAñadirDB(sesionActiva.id, productoPendiente);
+                 setProductoPendiente(null);
+              }
+           }
+        }
       };
 
+      // FLUJO AL PULSAR "AÑADIR"
       const intentarAñadirAlCarrito = (producto) => {
         if (!user) { 
            setProductoPendiente(producto);
@@ -330,6 +321,7 @@
         ejecutarAñadirDB(sesionActiva.id, producto);
       };
 
+      // FUNCIÓN IMPERATIVA: Añade a la DB y actualiza la pantalla en el mismo instante
       const ejecutarAñadirDB = async (idSesion, producto) => {
          try {
             let { data: ronda } = await supabase.from('pedidos_rondas')
@@ -347,20 +339,34 @@
                ronda_id: ronda.id, producto_id: producto.id, cantidad: 1, precio_unitario: producto.precio
             }]);
             
+            // FORZAMOS LA RECARGA INSTANTÁNEA
+            cargarRondasMesa(idSesion);
             mostrarToast(`Añadido: ${producto.nombre} 🛒`);
          } catch(e) { console.error(e); }
       };
 
       const eliminarItemBorrador = async (itemId) => {
          await supabase.from('items_pedido').delete().eq('id', itemId);
+         if (sesionActiva) cargarRondasMesa(sesionActiva.id); // Forzamos recarga
       };
 
+      // CREAR MESA IMPERATIVA: Se crea la mesa y al instante procesa el plato pendiente
       const procesarCrearMesaYPedir = async (esCompartida) => {
         setShowModoMesa(false);
         try {
-           const { data } = await supabase.from('sesiones_mesa').insert([{ num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida }]).select().single();
+           const { data, error } = await supabase.from('sesiones_mesa')
+               .insert([{ num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida }])
+               .select().single();
+               
+           if (error) throw error;
+           
            setSesionActiva(data);
-        } catch(e) { console.error(e); }
+           
+           if (productoPendiente) {
+              await ejecutarAñadirDB(data.id, productoPendiente);
+              setProductoPendiente(null);
+           }
+        } catch(e) { alert("Error creando mesa: " + e.message); }
       };
 
       const enviarACocinaDB = async () => {
@@ -374,23 +380,24 @@
                .select('id').eq('sesion_id', sesionActiva.id).eq('estado', 'pendiente');
                
             if (pendientes && pendientes.length > 0) {
-               mostrarToast("¡Tú estás listo! Esperando a tus amigos... ⏳");
+               mostrarToast("¡Estás listo! Esperando a tus amigos... ⏳");
+               cargarRondasMesa(sesionActiva.id);
             } else {
                await supabase.from('pedidos_rondas').update({estado: 'enviado', fecha: new Date().toISOString()})
                   .eq('sesion_id', sesionActiva.id).eq('estado', 'listo');
                mostrarToast("¡Ronda grupal enviada a cocina! 🚀");
+               cargarRondasMesa(sesionActiva.id);
             }
          } catch(e) { console.error(e); }
       };
 
-      // 🛑 EL ARREGLO: Ya no hay `setTimeout` que auto-cierra la mesa. Esperamos eternamente al iPad.
+      // SOLO AVISA A CAJA Y ESPERA (Cero auto-cierre)
       const pedirCuenta = async () => {
         if (!sesionActiva) return;
         await supabase.from('sesiones_mesa').update({ estado: 'pagando' }).eq('id', sesionActiva.id);
         mostrarToast("El camarero trae la cuenta. ¡Avisado! 💸");
       };
 
-      // 🧾 GENERAR EL TICKET FINAL AL CERRAR DESDE EL IPAD
       const cargarTicketFinal = async (idSesion) => {
          try {
             const { data: misRondas } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', idSesion).eq('usuario_id', user.id).in('estado', ['enviado', 'preparando', 'servido']);
@@ -406,11 +413,9 @@
                }
             }
             
-            // Calculo los puntos reales para darlos
             const puntosGanados = Math.floor(totalGastado * 20);
             if (puntosGanados > 0 && user) {
                await supabase.from('usuarios').update({ puntos: (userProfile?.puntos || 0) + puntosGanados }).eq('id', user.id);
-               // Refrescar UI Puntos
                const { data: userData } = await supabase.auth.getUser();
                if (userData?.user) procesarUsuario(userData.user);
             }
@@ -423,7 +428,6 @@
          }
       };
 
-      // RESET TOTAL (Cierra Modal Reseñas y limpia la URL)
       const finalizarYSalir = () => {
          setShowReviewModal(false);
          window.location.href = window.location.pathname; 
@@ -454,7 +458,7 @@
             <div className="text-8xl mb-8">🔒</div>
             <h1 className="text-4xl font-black mb-4">Mesa Cerrada</h1>
             <p className="text-gray-300 font-medium text-lg leading-relaxed mb-12">El host de esta mesa ha seleccionado <b className="text-yellow-400">Cuenta Única</b>. No se admiten más móviles conectados a esta mesa.</p>
-            <button onClick={() => window.location.search=''} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-2xl shadow-xl text-xl">Cambiar de mesa</button>
+            <button onClick={() => window.location.href = window.location.pathname} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-2xl shadow-xl text-xl">Cambiar de mesa</button>
           </div>
         );
       }
@@ -477,10 +481,7 @@
 
       const miRondaBorrador = rondasBorrador.find(r => r.usuario_id === user?.id);
       const totalItemsMesaPendiente = rondasBorrador.reduce((acc, r) => acc + r.items.length, 0);
-
-      const totalMesaEnviada = rondasEnviadas.reduce((acc, r) => {
-         return acc + r.items.reduce((sum, item) => sum + (item.cantidad * item.precio_unitario), 0);
-      }, 0);
+      const totalMesaEnviada = rondasEnviadas.reduce((acc, r) => acc + r.items.reduce((sum, item) => sum + (item.cantidad * item.precio_unitario), 0), 0);
 
       return (
         <div className="pb-36 bg-gray-50 min-h-screen relative flex flex-col">
@@ -493,7 +494,6 @@
             </div>
           )}
 
-          {/* UNIRSE A MESA OBLIGATORIO */}
           {showJoinPrompt && (
             <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
@@ -501,12 +501,11 @@
                 <h3 className="text-3xl font-black text-gray-800 mb-2">Mesa de {hostName}</h3>
                 <p className="text-gray-500 font-medium text-lg mb-8">Esta mesa ya está abierta. ¿Estás en su grupo?</p>
                 <button onClick={aceptarUnirse} className="w-full bg-yellow-400 text-yellow-900 font-black py-5 rounded-2xl shadow-lg text-xl mb-4 active:scale-95 transition-transform">Sí, unirme a la mesa</button>
-                <button onClick={() => window.location.search=''} className="w-full bg-gray-100 text-gray-600 font-black py-4 rounded-2xl">No, me he equivocado</button>
+                <button onClick={() => window.location.href = window.location.pathname} className="w-full bg-gray-100 text-gray-600 font-black py-4 rounded-2xl">No, me he equivocado</button>
               </div>
             </div>
           )}
 
-          {/* CABECERA */}
           <header className="bg-red-600 text-white p-4 sticky top-0 z-30 shadow-md">
             <div className="flex justify-between items-center">
               <h1 className="font-black text-2xl text-yellow-400 tracking-tighter">BOKALIA</h1>
@@ -523,7 +522,6 @@
             </div>
           </header>
 
-          {/* BANNERS INFORMATIVOS */}
           {!user && (
              <div onClick={() => { setAuthMode('register'); setShowAuthModal(true); }} className="bg-gradient-to-r from-orange-500 to-red-500 text-white p-4 flex justify-between items-center cursor-pointer shadow-sm">
                 <div>
@@ -544,7 +542,6 @@
              </div>
           )}
 
-          {/* VISTA RESERVAS */}
           {vistaActual === 'reservas' && (
             <div className="p-8 text-center mt-20 animate-fade-in flex-grow">
               <div className="text-6xl mb-6">📅</div>
@@ -553,7 +550,6 @@
             </div>
           )}
 
-          {/* 📜 VISTA HISTORIAL */}
           {vistaActual === 'historial' && (
             <div className="p-4 animate-fade-in flex-grow">
               <h2 className="text-2xl font-black text-gray-800 mb-4 tracking-tight">Tus Pedidos Anteriores</h2>
@@ -596,7 +592,6 @@
                         </div>
                      );
                   })}
-                  
                   <button onClick={borrarHistorial} className="w-full mt-8 bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl active:bg-gray-200 transition-colors">
                     Limpiar mi historial visual
                   </button>
@@ -605,10 +600,8 @@
             </div>
           )}
 
-          {/* VISTA MESA PRINCIPAL */}
           {vistaActual === 'mesa' && (
             <div className="animate-fade-in flex-grow relative">
-              
               <div className="m-4">
                 {!user ? (
                   <div className="relative overflow-hidden rounded-[2rem] p-6 shadow-lg bg-gradient-to-br from-gray-700 to-gray-900 text-white cursor-pointer" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
@@ -650,7 +643,6 @@
 
               <div className="p-4">
                 
-                {/* 🛒 BORRADOR DE LA MESA */}
                 {rondasBorrador.length > 0 && (
                   <div className="mb-10 bg-orange-50 p-5 rounded-[2rem] border-2 border-orange-200 shadow-md animate-fade-in">
                     <h2 className="text-xl font-black text-orange-900 mb-4 flex items-center gap-2">
@@ -684,7 +676,6 @@
                   </div>
                 )}
 
-                {/* UPSELLING */}
                 {ultimoPedido && (
                   <div className="bg-gradient-to-r from-orange-500 to-red-500 p-1.5 rounded-[2rem] shadow-lg mb-8">
                     <div className="bg-white/10 backdrop-blur-sm rounded-[1.6rem] p-4 flex items-center justify-between border border-white/20">
@@ -714,7 +705,6 @@
                   ))}
                 </div>
 
-                {/* 🧾 LA CUENTA DE LA MESA */}
                 {rondasEnviadas.length > 0 && (
                   <div className="mb-8">
                     <div className="flex justify-between items-center mb-4 ml-1">
@@ -760,7 +750,6 @@
             </div>
           )}
 
-          {/* BOTÓN FLOTANTE "MANDAR A COCINA" */}
           {totalItemsMesaPendiente > 0 && vistaActual === 'mesa' && !mesaBloqueada && (
             <div className="fixed bottom-0 left-0 w-full bg-white p-5 shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.15)] z-20 animate-slide-up rounded-t-[2.5rem]">
               <div className="flex justify-between items-center max-w-md mx-auto">
@@ -778,7 +767,6 @@
             </div>
           )}
 
-          {/* MODALES ABSOLUTES */}
           {showAuthModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
               <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
@@ -816,7 +804,6 @@
             </div>
           )}
 
-          {/* 🧾 TICKET MODAL */}
           {showTicketModal && (
             <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
