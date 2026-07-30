@@ -12,19 +12,20 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
-    body { font-family: system-ui, sans-serif; background: #f9fafb; margin: 0; -webkit-tap-highlight-color: transparent; }
-    @keyframes slideUp { from { transform: translate3d(0, 100%, 0); } to { transform: translate3d(0, 0, 0); } }
+    body { font-family: system-ui, sans-serif; background: #111827; margin: 0; -webkit-tap-highlight-color: transparent; }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-    @keyframes fadeIn { from { opacity: 0; transform: translate3d(0, -10px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
-    .animate-fade-in { animation: fadeIn 0.25s ease forwards; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fade-in { animation: fadeIn 0.3s ease forwards; }
     .mobile-container { transform: translate(0); }
   </style>
 </head>
-<body class="flex justify-center min-h-screen bg-gray-900">
+<body class="flex justify-center min-h-screen">
   
-  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container pb-10">
-    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; color:#dc2626;">
-      <h1 style="font-size:3rem; font-weight:900;">BOKALIA</h1>
+  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container">
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background-color:#fefce8; color:#dc2626;">
+      <h1 style="font-size:3rem; font-weight:900; margin:0; letter-spacing:-2px;">BOKALIA</h1>
+      <p style="font-weight:bold; margin-top:10px; opacity:0.7;">Cargando perfil...</p>
     </div>
   </div>
 
@@ -41,7 +42,7 @@
       const [vistaActual, setVistaActual] = useState('inicio'); 
       const [loading, setLoading] = useState(true);
       const [user, setUser] = useState(null);
-      const [wallets, setWallets] = useState([]); // Array para múltiples restaurantes
+      const [wallets, setWallets] = useState([]); 
       const [historial, setHistorial] = useState([]);
       
       const [showAuthModal, setShowAuthModal] = useState(false);
@@ -53,47 +54,49 @@
       const [toastMsg, setToastMsg] = useState('');
 
       useEffect(() => {
-        let isMounted = true;
-        const timer = setTimeout(() => { if (isMounted) setLoading(false); }, 1500);
+        // Anti-cuelgues: A los 2 segundos quita la pantalla de carga sí o sí
+        const safeTimer = setTimeout(() => setLoading(false), 2000);
 
         supabase.auth.getSession().then(({ data }) => {
-          if (data?.session?.user && isMounted) procesarUsuario(data.session.user);
-          else if (isMounted) setLoading(false);
-        }).catch(() => { if (isMounted) setLoading(false); });
+          if (data?.session?.user) procesarUsuario(data.session.user);
+          else setLoading(false);
+        }).catch(() => setLoading(false));
 
         const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
           if (session?.user) procesarUsuario(session.user);
           else { setUser(null); setWallets([]); setHistorial([]); setLoading(false); }
         });
 
-        return () => { isMounted = false; clearTimeout(timer); if (authListener?.subscription) authListener.subscription.unsubscribe(); };
+        return () => { clearTimeout(safeTimer); if (authListener?.subscription) authListener.subscription.unsubscribe(); };
       }, []);
 
       const procesarUsuario = async (authUser) => {
         setUser(authUser);
         try {
-          // 1. Asegurar usuario en DB
+          // 1. Miramos si el usuario existe (¡Ojo! Ya no insertamos puntos aquí)
           let { data: perfil } = await supabase.from('usuarios').select('id').eq('id', authUser.id).maybeSingle();
-          if (!perfil) await supabase.from('usuarios').insert([{ id: authUser.id, email: authUser.email }]);
+          if (!perfil) {
+             await supabase.from('usuarios').insert([{ id: authUser.id, email: authUser.email }]);
+          }
 
-          // 2. Traer todas sus carteras (Wallets Multi-Restaurante)
+          // 2. Traer todas sus carteras de puntos (Multi-Restaurante)
           const { data: misPuntos } = await supabase.from('puntos_fidelizacion')
             .select('puntos, restaurante:restaurantes(nombre)')
             .eq('usuario_id', authUser.id);
             
           if (misPuntos) setWallets(misPuntos);
 
-          // 3. Traer Historial
+          // 3. Traer su Historial de todos los restaurantes
           const seisMesesAtras = new Date();
           seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
           const { data: dataHistorial } = await supabase.from('pedidos_rondas')
             .select('id, fecha, estado, sesion:sesiones_mesa!inner(estado, restaurante:restaurantes(nombre)), items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
             .eq('usuario_id', authUser.id).eq('oculto_usuario', false).eq('sesiones_mesa.estado', 'pagada')
-            .gte('fecha', seisMesesAtras.toISOString()).order('fecha', { ascending: false }).limit(15);
+            .gte('fecha', seisMesesAtras.toISOString()).order('fecha', { ascending: false }).limit(20);
             
           if (dataHistorial) setHistorial(dataHistorial.filter(h => h.items && h.items.length > 0));
 
-        } catch(e) { console.error(e); } 
+        } catch(e) { console.error("Error al cargar perfil:", e); } 
         finally { setLoading(false); }
       };
 
@@ -129,7 +132,7 @@
          return (
            <div className="h-screen flex items-center justify-center bg-yellow-50 flex-col">
               <div className="w-16 h-16 border-8 border-red-200 border-t-red-600 rounded-full animate-spin mb-6"></div>
-              <h2 className="text-2xl font-black text-red-600 tracking-tighter animate-pulse">Cargando Bokalia...</h2>
+              <h2 className="text-2xl font-black text-red-600 tracking-tighter animate-pulse">Cargando Perfil...</h2>
            </div>
          );
       }
@@ -146,10 +149,10 @@
           )}
 
           {/* CABECERA */}
-          <header className="bg-red-600 text-white p-5 shadow-md flex justify-between items-center rounded-b-3xl z-10 relative">
+          <header className="bg-red-600 text-white p-5 shadow-md flex justify-between items-center z-10 relative">
             <h1 className="font-black text-3xl text-yellow-400 tracking-tighter">BOKALIA</h1>
             {user ? (
-               <button onClick={async () => await supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-4 py-2 rounded-xl active:bg-red-900">Cerrar Sesión</button> 
+               <button onClick={async () => await supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-4 py-2 rounded-xl active:bg-red-900 transition-colors">Cerrar Sesión</button> 
             ) : (
                <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-black bg-yellow-400 text-red-900 px-6 py-2 rounded-xl shadow-sm">Entrar</button>
             )}
@@ -183,7 +186,7 @@
                      <div className="bg-white border-2 border-dashed border-gray-200 p-8 rounded-[2rem] text-center mt-4">
                         <span className="text-5xl block mb-4">💳</span>
                         <h3 className="text-xl font-black text-gray-800 mb-2">Aún no tienes puntos</h3>
-                        <p className="text-sm text-gray-500 font-medium">Escanea un código en tu próxima visita para empezar a sumar puntos en tus restaurantes favoritos.</p>
+                        <p className="text-sm text-gray-500 font-medium">Escanea un código en tu próxima visita a cualquier local Bokalia para empezar a sumar puntos en tus restaurantes favoritos.</p>
                      </div>
                   ) : (
                      <div className="space-y-4 mt-4">
@@ -197,7 +200,7 @@
                                  <p className="text-5xl font-black tracking-tighter">{w.puntos} <span className="text-xl font-bold opacity-80">pts</span></p>
                                </div>
                                <div className="bg-white/40 backdrop-blur-md px-3 py-1 rounded-xl text-[10px] font-black uppercase shadow-sm border border-white/50 tracking-widest">
-                                 {w.puntos > 500 ? 'VIP ORO 👑' : 'VIP BRONCE'}
+                                 {w.puntos > 1500 ? 'VIP ORO 👑' : 'VIP BRONCE'}
                                </div>
                              </div>
                              
@@ -215,7 +218,7 @@
                      </div>
                   )}
 
-                  {/* ESCANEO MANUAL */}
+                  {/* ESCANEO MANUAL (SIN CARTA) */}
                   <div className="mt-8 bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 text-center">
                      <div className="text-5xl mb-4">📍</div>
                      <h3 className="font-black text-2xl text-gray-800 mb-2 tracking-tighter">¿Estás en el local?</h3>
@@ -225,13 +228,14 @@
                         <input type="number" id="manualMesa" placeholder="Nº Mesa" className="bg-transparent w-full text-center font-black text-xl outline-none" />
                         <button onClick={() => {
                            const num = document.getElementById('manualMesa').value;
-                           if(num) window.location.href = `index.html?mesa=${num}`; 
+                           if(num) window.location.href = `index.html?mesa=${num}`; // Redirige a la PWA de Pedidos
                         }} className="bg-gray-800 text-white font-black px-6 py-4 rounded-xl active:scale-95 transition-transform">
                            Ir
                         </button>
                      </div>
                   </div>
 
+                  {/* TUTORIAL APP NATIVA */}
                   {user && !window.matchMedia('(display-mode: standalone)').matches && !window.navigator.standalone && (
                      <div onClick={() => setShowInstallTutorial(true)} className="mt-6 bg-blue-600 text-white p-5 rounded-3xl flex justify-between items-center shadow-md cursor-pointer active:scale-95 transition-transform">
                         <div>
@@ -259,7 +263,7 @@
                   ) : historial.length === 0 ? (
                      <div className="bg-gray-100 p-8 rounded-[2rem] text-center mt-4">
                         <span className="text-4xl grayscale opacity-50 block mb-3">🧾</span>
-                        <p className="text-gray-500 font-bold">Aún no hay visitas pagadas.</p>
+                        <p className="text-gray-500 font-bold">Aún no hay visitas pagadas en ningún restaurante Bokalia.</p>
                      </div>
                   ) : (
                      <div className="space-y-4">
@@ -269,7 +273,7 @@
                               <div key={h.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
                                 <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-3">
                                   <div>
-                                     <span className="text-xs font-black text-gray-800 block uppercase">{h.sesion?.restaurante?.nombre || 'Local'}</span>
+                                     <span className="text-xs font-black text-gray-800 block uppercase">{h.sesion?.restaurante?.nombre || 'Local Bokalia'}</span>
                                      <span className="text-[10px] font-bold text-gray-400">{formatDate(h.fecha)}</span>
                                   </div>
                                   <span className="text-lg font-black text-green-500">{formatMoney(total)}€</span>
@@ -332,8 +336,8 @@
                    <p className="text-gray-500 font-medium mb-8 text-sm">Instala la App en tu pantalla de inicio para entrar más rápido.</p>
                    
                    <div className="bg-gray-50 p-5 rounded-2xl text-left text-sm font-bold text-gray-700 space-y-4 mb-8 border border-gray-200 shadow-inner">
-                      <p className="flex items-start gap-3"><span className="text-xl">1️⃣</span> <span className="mt-1">Toca <b>Compartir</b> en Safari o <b>3 puntitos</b> en Android.</span></p>
-                      <p className="flex items-center gap-3"><span className="text-xl">2️⃣</span> <span>Baja por el menú de opciones.</span></p>
+                      <p className="flex items-start gap-3"><span className="text-xl">1️⃣</span> <span className="mt-1">Toca <b>Compartir</b> en Safari o <b>3 puntitos</b> en Chrome.</span></p>
+                      <p className="flex items-center gap-3"><span className="text-xl">2️⃣</span> <span>Desliza por el menú de opciones.</span></p>
                       <p className="flex items-start gap-3"><span className="text-xl">3️⃣</span> <span className="mt-1">Toca <b>Añadir a pantalla de inicio</b> ➕.</span></p>
                    </div>
                    <button onClick={() => setShowInstallTutorial(false)} className="w-full bg-blue-100 text-blue-600 font-black py-4 rounded-2xl text-lg active:scale-95 transition-transform">Entendido</button>
@@ -346,7 +350,7 @@
     }
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<ErrorBoundary><PerfilApp /></ErrorBoundary>);
+    root.render(<PerfilApp />);
   </script>
 </body>
 </html>
