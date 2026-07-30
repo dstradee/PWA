@@ -30,9 +30,9 @@
   </div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
-    const TIEMPO_LIMITE_MINUTOS = 0.5; // TODO: Cambiar a 120 (2h) en producción
-
+    const { useState, useEffect } = React;
+    const TIEMPO_LIMITE_MINUTOS = 120; // 2 horas
+    
     class ErrorBoundary extends React.Component {
       constructor(props) { super(props); this.state = { hasError: false, error: null }; }
       static getDerivedStateFromError(error) { return { hasError: true, error }; }
@@ -74,39 +74,29 @@
       const [mesaBloqueada, setMesaBloqueada] = useState(false);
       const [hostName, setHostName] = useState('');
       
-      // Carritos y Rondas
-      const [carrito, setCarrito] = useState([]); 
-      const [carritosAmigos, setCarritosAmigos] = useState({}); 
-      const [rondas, setRondas] = useState([]); 
+      // LA MAGIA: Rondas agrupadas de la Base de Datos
+      const [rondasBorrador, setRondasBorrador] = useState([]); 
+      const [rondasEnviadasGrupos, setRondasEnviadasGrupos] = useState({});
       const [historial, setHistorial] = useState([]);
       
-      // Upselling y Actividad
+      // UI
       const [ultimoPedido, setUltimoPedido] = useState(null);
-      const [ultimaActividad, setUltimaActividad] = useState(Date.now());
-      const [productoPendiente, setProductoPendiente] = useState(null);
-      
-      // Modales UI
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('login'); 
       const [email, setEmail] = useState('');
       const [password, setPassword] = useState('');
       
       const [showModoMesa, setShowModoMesa] = useState(false);
+      const [productoPendiente, setProductoPendiente] = useState(null);
       const [showJoinPrompt, setShowJoinPrompt] = useState(false);
       const [showReviewModal, setShowReviewModal] = useState(false);
-      const [showTimeoutModal, setShowTimeoutModal] = useState(false);
-      
-      const [notifPerm, setNotifPerm] = useState('default');
       const [toastMsg, setToastMsg] = useState('');
-
-      const channelRef = useRef(null);
 
       // 1. INICIALIZACIÓN
       useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const mesa = urlParams.get('mesa');
         if (mesa) setMesaParam(parseInt(mesa));
-        if ('Notification' in window) setNotifPerm(Notification.permission);
 
         cargarMenu();
 
@@ -123,7 +113,7 @@
         return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
       }, []);
 
-      // 2. VIGILANTE GLOBAL DE LA MESA
+      // 2. VIGILANTE DE MESA GLOBAL (Sabe si alguien la ocupa o la paga)
       useEffect(() => {
         if (!mesaParam || authLoading) return;
         verificarSesionMesa();
@@ -138,66 +128,33 @@
         return () => supabase.removeChannel(globalChannel);
       }, [mesaParam, user, authLoading, sesionActiva]);
 
-      // 3. VIGILANTE EN TIEMPO REAL DEL CARRITO (BROADCAST)
+      // 3. VIGILANTE DE PEDIDOS EN TIEMPO REAL (Actualiza la pantalla de todos al instante)
       useEffect(() => {
         if (sesionActiva) {
           cargarRondasMesa(sesionActiva.id);
           
-          channelRef.current = supabase.channel(`mesa_canal_${sesionActiva.id}`)
-            .on('broadcast', { event: 'cart_sync' }, (payload) => {
-               const data = payload.payload;
-               if (user && data.userId !== user.id) {
-                  setCarritosAmigos(prev => {
-                     const newState = { ...prev, [data.userId]: data };
-                     if (data.cart.length === 0) delete newState[data.userId];
-                     return newState;
-                  });
-               }
+          const channel = supabase.channel(`db_sync_mesa_${sesionActiva.id}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_rondas', filter: `sesion_id=eq.${sesionActiva.id}` }, () => {
+               cargarRondasMesa(sesionActiva.id);
             })
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_rondas' }, (payload) => {
-               if (sesionActiva && (payload.new?.sesion_id === sesionActiva.id || payload.old?.sesion_id === sesionActiva.id)) {
-                  cargarRondasMesa(sesionActiva.id);
-                  setUltimaActividad(Date.now());
-                  setCarritosAmigos({});
-               }
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'items_pedido' }, () => {
+               // Si alguien borra o añade un plato, refrescamos
+               cargarRondasMesa(sesionActiva.id);
+            })
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sesiones_mesa', filter: `id=eq.${sesionActiva.id}` }, (payload) => {
+               if (payload.new.estado === 'pagada') setTimeout(() => setShowReviewModal(true), 2000);
             })
             .subscribe();
 
-          return () => { if (channelRef.current) supabase.removeChannel(channelRef.current); };
+          return () => supabase.removeChannel(channel);
         }
       }, [sesionActiva, user]);
 
-      // EFECTO MEMORIA (FLUJO INTELIGENTE AL REGISTRARSE)
-      useEffect(() => {
-         if (user && productoPendiente && !authLoading) {
-            if (!sesionActiva) {
-               setShowModoMesa(true);
-            } else {
-               ejecutarAñadirLocal(productoPendiente);
-               setProductoPendiente(null);
-            }
-         }
-      }, [user, productoPendiente, authLoading, sesionActiva]);
-
-      // RELOJ INACTIVIDAD
-      useEffect(() => {
-        if (!sesionActiva || sesionActiva.estado === 'pagada') return;
-        const interval = setInterval(() => {
-          const minutos = (Date.now() - ultimaActividad) / 60000;
-          if (minutos >= TIEMPO_LIMITE_MINUTOS && !showTimeoutModal) {
-             if (notifPerm === 'granted') new Notification('Bokalia 🍔', { body: '¿Sigues en la mesa?' });
-             setShowTimeoutModal(true);
-          }
-        }, 5000);
-        return () => clearInterval(interval);
-      }, [sesionActiva, ultimaActividad, showTimeoutModal, notifPerm]);
-
-      // CARGAR VISTAS SECUNDARIAS
       useEffect(() => {
         if (vistaActual === 'historial') cargarHistorial();
       }, [vistaActual, user]);
 
-      // --- FUNCIONES CORE ---
+      // --- FUNCIONES DB ---
       const procesarUsuario = async (authUser) => {
         setUser(authUser);
         try {
@@ -213,49 +170,10 @@
         setAuthLoading(false);
       };
 
-      const pedirNotificaciones = async () => {
-        if (!('Notification' in window)) {
-          alert("🍏 Si estás en iPhone: Pulsa 'Compartir' (el cuadrado con la flecha) y dale a 'Añadir a la pantalla de inicio'.");
-          return;
-        }
-        try {
-          const permission = await Notification.requestPermission();
-          setNotifPerm(permission);
-          if (permission === 'granted' && user) mostrarToast("¡Avisos activados! 🔔");
-          else if (permission === 'denied') alert("Avisos bloqueados. Actívalos en los Ajustes de tu móvil.");
-        } catch (error) { alert("Añade la web a inicio para recibir avisos."); }
-      };
-
       const cargarMenu = async () => {
         const { data, error } = await supabase.from('productos').select('*').eq('activo', true);
         if (error || !data || data.length === 0) setProductos(MENU_EMERGENCIA);
         else setProductos(data);
-      };
-
-      // 📜 NUEVO HISTORIAL MEJORADO
-      const cargarHistorial = async () => {
-        if (!user) return;
-        const { data, error } = await supabase.from('pedidos_rondas')
-          .select('id, fecha, estado, items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
-          .eq('usuario_id', user.id).eq('oculto_usuario', false).neq('estado', 'pendiente').order('fecha', { ascending: false });
-        
-        if (error) {
-           console.error("Error cargando historial", error);
-        } else if (data) {
-           // Filtramos por seguridad para mostrar solo los que traen items reales
-           const historialValido = data.filter(h => h.items && h.items.length > 0);
-           setHistorial(historialValido);
-        }
-      };
-
-      const borrarHistorial = async () => {
-        if (!user || historial.length === 0) return;
-        if (window.confirm("¿Limpiar todo tu historial visual?")) {
-           // Lo ocultamos al usuario, pero se queda en la DB
-           await supabase.from('pedidos_rondas').update({ oculto_usuario: true }).eq('usuario_id', user.id);
-           setHistorial([]);
-           mostrarToast("Historial ocultado 🧹");
-        }
       };
 
       const buscarUltimoPedido = async (userId) => {
@@ -263,6 +181,28 @@
         if (ultimas && ultimas.length > 0) {
           const { data: items } = await supabase.from('items_pedido').select('producto_id, producto:productos(*)').eq('ronda_id', ultimas[0].id).limit(1);
           if (items && items.length > 0 && items[0].producto) setUltimoPedido(items[0].producto);
+        }
+      };
+
+      const cargarHistorial = async () => {
+        if (!user) return;
+        const seisMesesAtras = new Date();
+        seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
+
+        const { data } = await supabase.from('pedidos_rondas')
+          .select('id, fecha, estado, items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
+          .eq('usuario_id', user.id).eq('oculto_usuario', false).in('estado', ['enviado', 'preparando', 'servido'])
+          .gte('fecha', seisMesesAtras.toISOString()).order('fecha', { ascending: false });
+        
+        if (data) setHistorial(data.filter(h => h.items && h.items.length > 0));
+      };
+
+      const borrarHistorial = async () => {
+        if (!user || historial.length === 0) return;
+        if (window.confirm("¿Limpiar tu historial visual?")) {
+           await supabase.from('pedidos_rondas').update({ oculto_usuario: true }).eq('usuario_id', user.id);
+           setHistorial([]);
+           mostrarToast("Historial ocultado 🧹");
         }
       };
 
@@ -297,22 +237,42 @@
         }
       };
 
+      // 🍔 EL CORAZÓN DE LA APP: Cargar lo que piden todos y agruparlo
       const cargarRondasMesa = async (idSesion) => {
         const { data } = await supabase.from('pedidos_rondas')
-          .select('*, items:items_pedido(id, cantidad, precio_unitario, producto_id, producto:productos(nombre, precio)), usuario:usuarios(nombre, email)')
+          .select('*, items:items_pedido(id, cantidad, precio_unitario, producto_id, producto:productos(nombre)), usuario:usuarios(nombre, email)')
           .eq('sesion_id', idSesion).order('fecha', { ascending: true });
-        if (data) setRondas(data);
+          
+        if (data) {
+           // 1. Borrador: Todo lo que esté 'pendiente' o 'listo'
+           const borradores = data.filter(r => (r.estado === 'pendiente' || r.estado === 'listo') && r.items.length > 0);
+           setRondasBorrador(borradores);
+           
+           // 2. Enviados: Todo lo demás, lo agrupamos por minuto para que visualmente parezca UNA sola ronda grupal
+           const enviados = data.filter(r => r.estado === 'enviado' || r.estado === 'preparando' || r.estado === 'servido');
+           const agrupados = {};
+           
+           enviados.forEach(r => {
+              if (r.items.length === 0) return;
+              const timeKey = new Date(r.fecha).toISOString().slice(0, 16); // Agrupa si se enviaron en el mismo minuto
+              if (!agrupados[timeKey]) agrupados[timeKey] = { fecha: r.fecha, estado: r.estado, items: [] };
+              
+              r.items.forEach(item => {
+                 agrupados[timeKey].items.push({
+                    ...item, 
+                    propietario: r.usuario_id === user?.id ? 'Tú' : (r.usuario?.nombre || 'Amigo')
+                 });
+              });
+           });
+           
+           // Convertir de objeto a array para renderizarlo
+           const arrayAgrupados = Object.values(agrupados).sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+           setRondasEnviadasGrupos(arrayAgrupados);
+        }
       };
 
-      const handleAuth = async () => {
-        setAuthLoading(true);
-        const { error } = authMode === 'register' ? await supabase.auth.signUp({ email, password }) : await supabase.auth.signInWithPassword({ email, password });
-        if (error) { setAuthLoading(false); alert("Error: " + error.message); }
-        else setShowAuthModal(false); 
-      };
-
-      // 🍔 AÑADIR A LA CARTA Y MAGIA BROADCAST
-      const intentarAñadirAlCarrito = (producto) => {
+      // 🍔 FLUJO AÑADIR (Directo a la DB)
+      const intentarAñadirAlCarrito = async (producto) => {
         if (!user) { 
            setProductoPendiente(producto);
            setAuthMode('register'); 
@@ -324,79 +284,82 @@
            return setShowModoMesa(true);
         }
 
-        ejecutarAñadirLocal(producto);
+        // Si ya hay mesa, se inserta en tu ronda pendiente
+        await ejecutarAñadirDB(sesionActiva.id, producto);
       };
 
-      const ejecutarAñadirLocal = (producto) => {
-        const nuevoCarrito = [...carrito, { ...producto, idUnico: Math.random() }];
-        setCarrito(nuevoCarrito);
-        setUltimaActividad(Date.now());
-        
-        if (channelRef.current && sesionActiva) {
-           channelRef.current.send({
-              type: 'broadcast', event: 'cart_sync',
-              payload: { userId: user.id, userName: userProfile?.nombre || userProfile?.email?.split('@')[0] || 'Un Amigo', cart: nuevoCarrito }
-           });
-        }
+      const ejecutarAñadirDB = async (idSesion, producto) => {
+         try {
+            // Busco si yo ya tengo un borrador abierto
+            let miRonda = rondasBorrador.find(r => r.usuario_id === user.id);
+            let idRonda = miRonda?.id;
+            
+            if (!idRonda) {
+               // Si no tengo, creo una ronda 'pendiente'
+               const { data } = await supabase.from('pedidos_rondas').insert([{ sesion_id: idSesion, usuario_id: user.id, estado: 'pendiente' }]).select().single();
+               idRonda = data.id;
+            } else if (miRonda.estado === 'listo') {
+               // Si le había dado a 'listo' pero añado algo nuevo, me vuelve a poner 'pendiente' automáticamente
+               await supabase.from('pedidos_rondas').update({ estado: 'pendiente' }).eq('id', idRonda);
+            }
+            
+            // Guardo el plato en la base de datos (Esto avisa a todos al instante por Realtime)
+            await supabase.from('items_pedido').insert([{
+               ronda_id: idRonda, producto_id: producto.id, cantidad: 1, precio_unitario: producto.precio
+            }]);
+            
+            mostrarToast(`Añadido: ${producto.nombre} 🛒`);
+         } catch(e) { console.error("Error añadiendo item", e); }
       };
 
-      const eliminarItemCarrito = (idUnico) => {
-         const nuevoCarrito = carrito.filter(item => item.idUnico !== idUnico);
-         setCarrito(nuevoCarrito);
-         
-         if (channelRef.current && sesionActiva) {
-           channelRef.current.send({
-              type: 'broadcast', event: 'cart_sync',
-              payload: { userId: user.id, userName: userProfile?.nombre || userProfile?.email?.split('@')[0] || 'Un Amigo', cart: nuevoCarrito }
-           });
+      const eliminarItemBorrador = async (itemId) => {
+         await supabase.from('items_pedido').delete().eq('id', itemId);
+      };
+
+      // EFECTO MEMORIA TRAS REGISTRARSE O ELEGIR MODO MESA
+      useEffect(() => {
+         if (user && productoPendiente && !authLoading && sesionActiva) {
+            ejecutarAñadirDB(sesionActiva.id, productoPendiente);
+            setProductoPendiente(null);
          }
-      };
+      }, [user, authLoading, sesionActiva]);
 
       const procesarCrearMesaYPedir = async (esCompartida) => {
         setShowModoMesa(false);
         try {
            const { data } = await supabase.from('sesiones_mesa').insert([{ num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida }]).select().single();
            setSesionActiva(data);
-           
-           if (productoPendiente) {
-              const nuevoCarrito = [{ ...productoPendiente, idUnico: Math.random() }];
-              setCarrito(nuevoCarrito);
-              setProductoPendiente(null);
-           }
+           // El useEffect de arriba detectará que hay sesionActiva y productoPendiente, y lo añadirá.
         } catch(e) { console.error(e); }
       };
 
-      const enviarACocinaDB = async () => {
-        try {
-          if (carrito.length === 0 || !sesionActiva) return;
+      // 🍔 ENVIAR A COCINA (LÓGICA GRUPAL)
+      const enviarACocina = async () => {
+         if (!sesionActiva || !user) return;
+         
+         const miRonda = rondasBorrador.find(r => r.usuario_id === user.id);
+         if (!miRonda) return;
 
-          const { data: ronda, error: errRonda } = await supabase.from('pedidos_rondas').insert([{ sesion_id: sesionActiva.id, usuario_id: user.id, estado: 'enviado' }]).select().single();
-
-          if (errRonda) throw errRonda;
-
-          if (ronda) {
-            const conteo = {};
-            carrito.forEach(p => { conteo[p.id] = (conteo[p.id] || 0) + 1; });
-            const itemsInsert = Object.keys(conteo).map(id => ({
-              ronda_id: ronda.id, producto_id: id, cantidad: conteo[id], precio_unitario: carrito.find(p => p.id === id).precio
-            }));
+         try {
+            // 1. Yo me marco como "listo"
+            await supabase.from('pedidos_rondas').update({estado: 'listo'}).eq('id', miRonda.id);
             
-            const { error: errItems } = await supabase.from('items_pedido').insert(itemsInsert);
-            if (errItems) throw errItems;
-            
-            setCarrito([]);
-            if (channelRef.current) {
-               channelRef.current.send({ type: 'broadcast', event: 'cart_sync', payload: { userId: user.id, userName: '', cart: [] } });
+            // 2. Comprobamos si queda algún amigo "pendiente" en mi mesa
+            const { data: pendientes } = await supabase.from('pedidos_rondas')
+               .select('id').eq('sesion_id', sesionActiva.id).eq('estado', 'pendiente');
+               
+            if (pendientes && pendientes.length > 0) {
+               // Falta gente
+               mostrarToast("¡Tú estás listo! Esperando a que tus amigos confirmen... ⏳");
+            } else {
+               // 3. ¡Todos estamos listos! Disparamos todo a cocina agrupado con la misma fecha
+               await supabase.from('pedidos_rondas')
+                  .update({estado: 'enviado', fecha: new Date().toISOString()})
+                  .eq('sesion_id', sesionActiva.id).eq('estado', 'listo');
+                  
+               mostrarToast("¡Ronda enviada a cocina! 🚀");
             }
-            
-            setUltimaActividad(Date.now());
-            cargarRondasMesa(sesionActiva.id);
-            mostrarToast("¡Enviado a cocina! 🚀");
-          }
-        } catch (error) { 
-           alert("Hubo un error al enviar tu pedido. Actualiza la página.");
-           console.error(error); 
-        }
+         } catch(e) { console.error(e); }
       };
 
       const pedirCuenta = async () => {
@@ -426,13 +389,19 @@
          verificarSesionMesa();
       };
 
+      const handleAuth = async () => {
+        setAuthLoading(true);
+        const { error } = authMode === 'register' ? await supabase.auth.signUp({ email, password }) : await supabase.auth.signInWithPassword({ email, password });
+        if (error) { setAuthLoading(false); alert("Error: " + error.message); }
+        else setShowAuthModal(false);
+      };
+
       const formatMoney = (num) => Number(num).toFixed(2);
       const formatDate = (dateStr) => {
         const d = new Date(dateStr);
         return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} a las ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
       };
-
-      const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
+      const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
 
       // ==========================================
       // UI Y VISTAS
@@ -472,6 +441,10 @@
         </div>
       );
 
+      // Calculamos datos visuales de la mesa actual
+      const miRondaBorrador = rondasBorrador.find(r => r.usuario_id === user?.id);
+      const itemsEnMesaPendiente = rondasBorrador.reduce((acc, r) => acc + r.items.length, 0);
+
       return (
         <div className="pb-36 bg-gray-50 min-h-screen relative flex flex-col">
           
@@ -483,7 +456,7 @@
             </div>
           )}
 
-          {/* UNIRSE A MESA OBLIGATORIO */}
+          {/* OBLIGACIÓN DE UNIRSE A LA MESA (NO DEJA VER NADA SI NO ACEPTA) */}
           {showJoinPrompt && (
             <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
@@ -506,34 +479,13 @@
                  <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-black bg-yellow-400 text-red-900 px-5 py-2 rounded-xl shadow-sm">Entrar</button>
               )}
             </div>
-            {/* TABS HEADER */}
+            {/* TABS NAVEGACIÓN */}
             <div className="flex gap-3 border-t border-red-500 pt-3 mt-3 overflow-x-auto">
               <button onClick={() => setVistaActual('mesa')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='mesa' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Mesa {mesaParam}</button>
               <button onClick={() => setVistaActual('historial')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='historial' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Historial</button>
               <button onClick={() => setVistaActual('reservas')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='reservas' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Reservas</button>
             </div>
           </header>
-
-          {/* BANNERS INFORMATIVOS */}
-          {!user && (
-             <div onClick={() => { setAuthMode('register'); setShowAuthModal(true); }} className="bg-gradient-to-r from-orange-500 to-red-500 text-white p-4 flex justify-between items-center cursor-pointer shadow-sm">
-                <div>
-                   <p className="text-sm font-black mb-1">🎁 ¡Comida Gratis!</p>
-                   <p className="text-xs font-medium opacity-90">Crea tu cuenta ahora y suma puntos.</p>
-                </div>
-                <button className="bg-white text-red-600 text-xs font-black px-4 py-2 rounded-xl shadow-sm">Regístrate</button>
-             </div>
-          )}
-          
-          {user && notifPerm !== 'granted' && (
-             <div className="bg-blue-600 text-white p-4 flex justify-between items-center shadow-sm">
-                <div>
-                   <p className="text-sm font-black mb-1">🔔 ¡Ofertas exclusivas!</p>
-                   <p className="text-[10px] font-medium opacity-90 leading-tight">Activa los avisos en tu dispositivo.</p>
-                </div>
-                <button onClick={pedirNotificaciones} className="bg-white text-blue-600 text-xs font-black px-4 py-2 rounded-xl shadow-sm ml-2">Activar</button>
-             </div>
-          )}
 
           {/* VISTA RESERVAS */}
           {vistaActual === 'reservas' && (
@@ -544,14 +496,14 @@
             </div>
           )}
 
-          {/* 📜 VISTA HISTORIAL */}
+          {/* VISTA HISTORIAL */}
           {vistaActual === 'historial' && (
             <div className="p-4 animate-fade-in flex-grow">
               <h2 className="text-2xl font-black text-gray-800 mb-4 tracking-tight">Tus Pedidos</h2>
               
               {!user && (
                 <div className="bg-white p-6 rounded-3xl text-center border-2 border-dashed border-gray-200 mt-10">
-                  <p className="text-gray-500 font-bold mb-4">Inicia sesión para ver tu historial y volver a pedir tus favoritos.</p>
+                  <p className="text-gray-500 font-bold mb-4">Inicia sesión para ver tu historial.</p>
                   <button onClick={() => setShowAuthModal(true)} className="bg-red-600 text-white px-6 py-3 rounded-xl font-black">Entrar ahora</button>
                 </div>
               )}
@@ -596,7 +548,7 @@
             </div>
           )}
 
-          {/* VISTA MESA (CARTA Y PEDIDOS) */}
+          {/* VISTA MESA PRINCIPAL */}
           {vistaActual === 'mesa' && (
             <div className="animate-fade-in flex-grow relative">
               
@@ -641,57 +593,37 @@
 
               <div className="p-4">
                 
-                {/* 🛒 BORRADOR DE LA MESA EN TIEMPO REAL */}
-                {(carrito.length > 0 || Object.keys(carritosAmigos).length > 0) && (
+                {/* 🛒 BORRADOR DE LA MESA (100% DB EN TIEMPO REAL) */}
+                {rondasBorrador.length > 0 && (
                   <div className="mb-10 bg-orange-50 p-5 rounded-[2rem] border-2 border-orange-200 shadow-md animate-fade-in">
                     <h2 className="text-xl font-black text-orange-900 mb-4 flex items-center gap-2">
                       <span className="w-2.5 h-2.5 bg-orange-500 rounded-full animate-ping"></span>
                       Borrador de la Mesa
                     </h2>
                     
-                    {carrito.length > 0 && (
-                       <div className="mb-4">
-                         <p className="text-xs font-bold text-orange-700 uppercase tracking-widest border-b border-orange-200 pb-1 mb-2">Tú vas a pedir:</p>
+                    {rondasBorrador.map(ronda => (
+                       <div key={ronda.id} className={`mb-4 last:mb-0 ${ronda.usuario_id !== user?.id ? 'opacity-80' : ''}`}>
+                         <div className="flex justify-between items-end border-b border-orange-200 pb-1 mb-2">
+                            <p className="text-xs font-bold text-orange-700 uppercase tracking-widest">
+                               {ronda.usuario_id === user?.id ? 'Tú vas a pedir:' : `${ronda.usuario?.nombre || ronda.usuario?.email?.split('@')[0]} va a pedir:`}
+                            </p>
+                            {ronda.estado === 'listo' && <span className="text-[10px] font-black bg-green-500 text-white px-2 py-0.5 rounded-full uppercase">¡Listo! ✅</span>}
+                         </div>
                          <ul className="space-y-2">
-                            {carrito.map(item => (
-                               <li key={item.idUnico} className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm">
+                            {ronda.items.map(item => (
+                               <li key={item.id} className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm">
                                   <div className="flex gap-3 items-center text-sm font-bold text-gray-800">
-                                     <span className="text-orange-600">🍔</span> {item.nombre}
+                                     <span className="bg-orange-100 text-orange-600 w-6 h-6 flex items-center justify-center rounded-md">{item.cantidad}x</span>
+                                     {item.producto?.nombre}
                                   </div>
-                                  <button onClick={() => eliminarItemCarrito(item.idUnico)} className="text-red-500 bg-red-50 px-2 py-1 rounded text-xs font-black active:scale-95 transition-all">QUITAR</button>
-                               </li>
-                            ))}
-                         </ul>
-                       </div>
-                    )}
-
-                    {Object.values(carritosAmigos).map(amigoData => (
-                       <div key={amigoData.userId} className="mb-4 last:mb-0 opacity-80">
-                         <p className="text-xs font-bold text-orange-700 uppercase tracking-widest border-b border-orange-200 pb-1 mb-2">{amigoData.userName} va a pedir:</p>
-                         <ul className="space-y-2">
-                            {amigoData.cart.map((item, idx) => (
-                               <li key={idx} className="flex gap-3 items-center bg-white/50 p-3 rounded-xl text-sm font-bold text-gray-700">
-                                  <span>🛒</span> {item.nombre}
+                                  {ronda.usuario_id === user?.id && ronda.estado === 'pendiente' && (
+                                     <button onClick={() => eliminarItemBorrador(item.id)} className="bg-red-50 text-red-600 p-2 rounded-lg font-black text-xs active:scale-95 transition-all">QUITAR</button>
+                                  )}
                                </li>
                             ))}
                          </ul>
                        </div>
                     ))}
-                  </div>
-                )}
-
-                {/* UPSELLING */}
-                {ultimoPedido && (
-                  <div className="bg-gradient-to-r from-orange-500 to-red-500 p-1.5 rounded-[2rem] shadow-lg mb-8">
-                    <div className="bg-white/10 backdrop-blur-sm rounded-[1.6rem] p-4 flex items-center justify-between border border-white/20">
-                      <div>
-                        <span className="bg-yellow-400 text-yellow-900 text-[10px] font-black px-2 py-1 rounded-lg uppercase shadow-sm tracking-widest">Pídelo de nuevo</span>
-                        <p className="text-white font-black text-xl mt-1 leading-tight">{ultimoPedido.nombre}</p>
-                      </div>
-                      <button onClick={() => intentarAñadirAlCarrito(ultimoPedido)} className="bg-white text-red-600 font-black py-3 px-5 rounded-2xl shadow-lg active:scale-95 transition-transform text-sm">
-                        + Añadir
-                      </button>
-                    </div>
                   </div>
                 )}
 
@@ -710,8 +642,8 @@
                   ))}
                 </div>
 
-                {/* RONDAS YA ENVIADAS */}
-                {rondas.length > 0 && (
+                {/* HISTORIAL GRUPAL AGRUPADO */}
+                {rondasEnviadasGrupos.length > 0 && (
                   <div className="mb-8">
                     <div className="flex justify-between items-center mb-4 ml-1">
                       <h2 className="text-xl font-black text-gray-800 flex items-center gap-2">
@@ -722,20 +654,20 @@
                         <button onClick={pedirCuenta} className="bg-gray-900 text-white text-xs font-black px-5 py-3 rounded-2xl shadow-lg active:bg-black transition-colors">Pedir Cuenta</button>
                       )}
                     </div>
-                    {rondas.map((ronda, i) => (
-                      <div key={ronda.id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-gray-100 mb-4">
+                    {rondasEnviadasGrupos.map((grupo, i) => (
+                      <div key={i} className="bg-white p-5 rounded-[2rem] shadow-sm border border-gray-100 mb-4">
                         <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-3">
-                          <p className="font-black text-gray-400 text-sm uppercase tracking-widest">Ronda #{i+1}</p>
-                          <span className="text-[10px] font-black text-green-700 bg-green-100 px-3 py-1 rounded-full uppercase tracking-widest">{ronda.estado}</span>
+                          <p className="font-black text-gray-400 text-sm uppercase tracking-widest">{formatDate(grupo.fecha)}</p>
+                          <span className="text-[10px] font-black text-green-700 bg-green-100 px-3 py-1 rounded-full uppercase tracking-widest">{grupo.estado}</span>
                         </div>
                         <ul className="text-sm text-gray-800 space-y-3">
-                          {ronda.items?.map((item, idx) => (
+                          {grupo.items.map((item, idx) => (
                             <li key={idx} className="flex gap-3 font-bold items-center text-base">
                                <span className="bg-gray-100 text-gray-600 w-8 h-8 flex items-center justify-center rounded-xl">{item.cantidad}x</span>
                                {item.producto?.nombre} 
                                <span className="text-gray-400 text-xs ml-auto text-right leading-tight">
                                   {item.precio_unitario}€<br/>
-                                  <span className="text-[9px] uppercase tracking-wider">{ronda.usuario_id === user?.id ? 'Tú' : ronda.usuario?.nombre || 'Amigo'}</span>
+                                  <span className="text-[9px] uppercase tracking-wider">{item.propietario}</span>
                                </span>
                             </li>
                           ))}
@@ -748,16 +680,19 @@
             </div>
           )}
 
-          {/* BOTÓN GIGANTE MANDAR A COCINA */}
-          {carrito.length > 0 && vistaActual === 'mesa' && !mesaBloqueada && (
+          {/* BOTÓN FLOTANTE "MANDAR A COCINA" */}
+          {itemsEnMesaPendiente > 0 && vistaActual === 'mesa' && !mesaBloqueada && (
             <div className="fixed bottom-0 left-0 w-full bg-white p-5 shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.15)] z-20 animate-slide-up rounded-t-[2.5rem]">
               <div className="flex justify-between items-center max-w-md mx-auto">
                 <div>
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Mesa pendiente</p>
-                  <p className="text-3xl font-black text-gray-800 tracking-tighter">{carrito.length} <span className="text-base font-bold text-gray-500">ítems</span></p>
+                  <p className="text-3xl font-black text-gray-800 tracking-tighter">{itemsEnMesaPendiente} <span className="text-base font-bold text-gray-500">ítems</span></p>
                 </div>
-                <button onClick={enviarACocinaDB} className="bg-green-500 text-white font-black py-4 px-6 rounded-2xl shadow-[0_8px_20px_rgba(34,197,94,0.4)] text-lg flex items-center gap-2 active:scale-95 transition-transform">
-                  Mandar a cocina
+                <button 
+                  onClick={enviarACocina} 
+                  disabled={miRondaBorrador?.estado === 'listo'}
+                  className={`font-black py-4 px-6 rounded-2xl shadow-[0_8px_20px_rgba(0,0,0,0.1)] text-lg flex items-center gap-2 transition-transform ${miRondaBorrador?.estado === 'listo' ? 'bg-gray-200 text-gray-500' : 'bg-green-500 text-white active:scale-95 shadow-green-500/40'}`}>
+                  {miRondaBorrador?.estado === 'listo' ? 'Esperando a amigos...' : 'Mandar a cocina'}
                 </button>
               </div>
             </div>
@@ -768,18 +703,14 @@
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
               <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
                 <button onClick={() => { setShowAuthModal(false); setProductoPendiente(null); }} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
-                
                 <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">{authMode === 'login' ? 'Hola' : 'Únete'}</h3>
                 <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta.' : 'Crea tu cuenta para ganar puntos.'}</p>
                 <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
                 <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
-                
                 <button onClick={handleAuth} className={`w-full text-white font-black py-5 rounded-2xl text-xl active:scale-95 transition-transform mb-4 shadow-lg ${authMode === 'login' ? 'bg-red-600 shadow-red-600/30' : 'bg-yellow-400 text-yellow-900 shadow-yellow-400/50'}`}>
                    {authMode === 'login' ? 'Entrar' : 'Registrarme'}
                 </button>
-                <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-gray-500 font-bold py-3">
-                   {authMode === 'login' ? 'No tengo cuenta, crear una' : 'Ya tengo cuenta, iniciar sesión'}
-                </button>
+                <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-gray-500 font-bold py-3">{authMode === 'login' ? 'No tengo cuenta, crear una' : 'Ya tengo cuenta, iniciar sesión'}</button>
               </div>
             </div>
           )}
@@ -794,7 +725,7 @@
                 <div className="flex flex-col gap-4">
                   <button onClick={() => procesarCrearMesaYPedir(true)} className="w-full bg-yellow-400 text-yellow-900 font-black py-6 px-4 rounded-3xl shadow-xl shadow-yellow-400/30 active:scale-95 transition-transform flex flex-col items-center">
                     <span className="text-xl">Con Amigos</span>
-                    <span className="text-xs font-bold opacity-70 mt-1 uppercase tracking-widest text-center leading-tight">Cada uno suma puntos de sus platos<br/>y la cuenta se divide.</span>
+                    <span className="text-xs font-bold opacity-70 mt-1 uppercase tracking-widest text-center leading-tight">Cada uno suma puntos de sus platos<br/>y la cuenta se divide visualmente.</span>
                   </button>
                   <button onClick={() => procesarCrearMesaYPedir(false)} className="w-full bg-white text-gray-800 font-black py-6 px-4 rounded-3xl border-[3px] border-gray-200 active:scale-95 transition-transform flex flex-col items-center">
                     <span className="text-xl">Yo Solo</span>
@@ -805,23 +736,6 @@
             </div>
           )}
 
-          {showTimeoutModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-              <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up">
-                <div className="text-6xl mb-4">👀</div>
-                <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Sigues ahí?</h3>
-                <p className="text-sm text-gray-500 mb-8 font-medium">Llevas un tiempo sin pedir nada en la mesa.</p>
-                <button onClick={() => { setUltimaActividad(Date.now()); setShowTimeoutModal(false); }} className="w-full bg-green-500 text-white font-black py-5 rounded-2xl shadow-xl mb-4 text-xl">Sí, sigo aquí</button>
-                <button onClick={() => {
-                   setShowTimeoutModal(false);
-                   supabase.from('sesiones_mesa').update({ estado: 'pagada' }).eq('id', sesionActiva.id).then(() => {
-                      // Trigger de puntos al pagar
-                   });
-                }} className="w-full bg-red-100 text-red-600 font-black py-5 rounded-2xl text-xl">No, ya me he ido</button>
-              </div>
-            </div>
-          )}
-          
           {showReviewModal && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up">
