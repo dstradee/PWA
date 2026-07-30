@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Mi Perfil - Bokalia</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    body { font-family: system-ui, sans-serif; background: #111827; margin: 0; -webkit-tap-highlight-color: transparent; }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fade-in { animation: fadeIn 0.2s ease forwards; }
+    .mobile-container { transform: translate(0); }
+  </style>
+</head>
+<body class="flex justify-center min-h-screen">
+  
+  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container pb-10">
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background-color:#fefce8; color:#dc2626;">
+      <h1 style="font-size:3rem; font-weight:900; margin:0; letter-spacing:-2px;">BOKALIA</h1>
+      <p style="font-weight:bold; margin-top:10px; opacity:0.7;">Cargando perfil...</p>
+    </div>
+  </div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const supabase = window.supabase.createClient(
+      'https://bswlriuzeintgjioywtz.supabase.co',
+      'sb_publishable_oIWpn-mNPUZaQPdf7HNU_Q_Lc7R6UOB',
+      { auth: { persistSession: true, storage: window.localStorage, autoRefreshToken: true } }
+    );
+
+    function PerfilApp() {
+      const [user, setUser] = useState(null);
+      const [userProfile, setUserProfile] = useState(null);
+      const [historial, setHistorial] = useState([]);
+      const [loading, setLoading] = useState(true);
+      
+      const [showAuthModal, setShowAuthModal] = useState(false);
+      const [authMode, setAuthMode] = useState('login'); 
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+
+      useEffect(() => {
+        supabase.auth.getSession().then(({ data }) => {
+          if (data?.session?.user) procesarUsuario(data.session.user);
+          else setLoading(false);
+        });
+
+        const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
+          if(session?.user) procesarUsuario(session.user);
+          else { setUser(null); setUserProfile(null); setHistorial([]); setLoading(false); }
+        });
+
+        return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
+      }, []);
+
+      const procesarUsuario = async (authUser) => {
+        setUser(authUser);
+        try {
+          let { data } = await supabase.from('usuarios').select('*').eq('id', authUser.id).single();
+          if (!data) {
+            const { data: newUser } = await supabase.from('usuarios').insert([{ id: authUser.id, email: authUser.email, puntos: 50 }]).select().single();
+            data = newUser || { puntos: 50, email: authUser.email }; 
+          }
+          setUserProfile(data);
+          cargarHistorial(authUser.id);
+        } catch(e) { setUserProfile({ puntos: 0, email: authUser.email }); }
+        setLoading(false);
+      };
+
+      const cargarHistorial = async (userId) => {
+        const seisMesesAtras = new Date();
+        seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
+
+        const { data } = await supabase.from('pedidos_rondas')
+          .select('id, fecha, estado, sesion:sesiones_mesa!inner(estado), items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
+          .eq('usuario_id', userId).eq('oculto_usuario', false).eq('sesiones_mesa.estado', 'pagada')
+          .gte('fecha', seisMesesAtras.toISOString()).order('fecha', { ascending: false });
+          
+        if (data) setHistorial(data.filter(h => h.items && h.items.length > 0));
+      };
+
+      const handleAuth = async () => {
+        setLoading(true);
+        const { error } = authMode === 'register' 
+            ? await supabase.auth.signUp({ email, password }) 
+            : await supabase.auth.signInWithPassword({ email, password });
+        if (error) { setLoading(false); alert("Error: " + error.message); }
+        else setShowAuthModal(false);
+      };
+
+      const formatMoney = (num) => Number(num).toFixed(2);
+      const formatDate = (dateStr) => {
+        const d = new Date(dateStr);
+        return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
+      };
+
+      if (loading) return (
+        <div className="h-screen flex items-center justify-center bg-yellow-50 flex-col">
+           <div className="w-16 h-16 border-8 border-red-200 border-t-red-600 rounded-full animate-spin mb-6"></div>
+           <h2 className="text-2xl font-black text-red-600 tracking-tighter animate-pulse">Bokalia Wallet...</h2>
+        </div>
+      );
+
+      return (
+        <div className="bg-gray-50 min-h-screen relative flex flex-col">
+          
+          <header className="bg-red-600 text-white p-5 shadow-md flex justify-between items-center rounded-b-3xl z-10 relative">
+            <h1 className="font-black text-3xl text-yellow-400 tracking-tighter">BOKALIA</h1>
+            {user ? (
+               <button onClick={async () => await supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-4 py-2 rounded-xl active:bg-red-900 transition-colors">Cerrar Sesión</button> 
+            ) : (
+               <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-black bg-yellow-400 text-red-900 px-6 py-2 rounded-xl shadow-sm">Entrar</button>
+            )}
+          </header>
+
+          <main className="flex-grow p-4 -mt-4 z-0 relative">
+            
+            {/* WALLLET CARD */}
+            {!user ? (
+               <div className="relative overflow-hidden rounded-[2rem] p-8 shadow-xl bg-gradient-to-br from-gray-800 to-black text-white cursor-pointer mt-4" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
+                 <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center text-center p-6 backdrop-blur-sm">
+                     <div className="text-5xl mb-4">🎁</div>
+                     <h3 className="font-black text-2xl text-yellow-400 mb-2 leading-tight">Tu Bokalia Wallet</h3>
+                     <p className="text-sm font-medium text-white/90">Regístrate gratis para empezar a sumar puntos con cada pedido.</p>
+                     <button className="mt-6 bg-red-600 hover:bg-red-500 px-8 py-4 rounded-full font-black shadow-lg shadow-red-600/50 w-full transition-colors text-lg">Activar Cuenta</button>
+                 </div>
+                 <div className="opacity-10 blur-md pointer-events-none">
+                     <p className="text-[10px] font-bold uppercase mb-1">Bokalia Wallet Universal</p>
+                     <p className="text-5xl font-black mb-4">0 pts</p>
+                 </div>
+               </div>
+            ) : (
+               <div className="relative overflow-hidden rounded-[2.5rem] p-8 shadow-2xl bg-gradient-to-br from-yellow-400 to-yellow-500 text-yellow-900 mt-4 border border-yellow-300">
+                 <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-white opacity-20"></div>
+                 <div className="absolute -left-8 -bottom-8 w-32 h-32 rounded-full bg-white opacity-10"></div>
+                 
+                 <div className="relative z-10 flex justify-between items-start mb-8">
+                   <div>
+                     <p className="text-xs font-black uppercase tracking-widest mb-1 opacity-70">Wallet Universal</p>
+                     <p className="text-5xl font-black tracking-tighter">{userProfile?.puntos || 0} <span className="text-xl font-bold opacity-80">pts</span></p>
+                   </div>
+                   <div className="bg-white/40 backdrop-blur-md px-4 py-2 rounded-2xl text-xs font-black uppercase shadow-sm border border-white/50 text-yellow-900 tracking-widest">
+                     {(userProfile?.puntos||0) > 500 ? 'VIP ORO 👑' : 'VIP BRONCE'}
+                   </div>
+                 </div>
+                 
+                 <div className="relative z-10 bg-white/20 p-4 rounded-2xl border border-white/30 backdrop-blur-sm">
+                   <div className="flex justify-between text-xs font-black opacity-90 mb-3">
+                     <span className="uppercase tracking-wide">Meta: Menú Gratis</span>
+                     <span>{userProfile?.puntos || 0} / 1500</span>
+                   </div>
+                   <div className="h-4 w-full bg-yellow-900/10 rounded-full overflow-hidden shadow-inner">
+                     <div className="h-full bg-white rounded-full transition-all duration-1000 shadow-sm" style={{ width: `${Math.min(((userProfile?.puntos||0)/1500)*100, 100)}%` }}></div>
+                   </div>
+                 </div>
+               </div>
+            )}
+
+            {/* BOTÓN IR AL LOCAL (Si no usan NFC) */}
+            <div className="mt-8 bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 text-center">
+               <h3 className="font-black text-xl text-gray-800 mb-2">¿Estás en el restaurante?</h3>
+               <p className="text-gray-500 text-sm font-medium mb-6">Acerca el móvil al logo NFC de la mesa para empezar a pedir.</p>
+               
+               {/* Un botón secundario por si el NFC del cliente está roto */}
+               <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-2xl border border-gray-200">
+                  <input type="number" id="manualMesa" placeholder="Nº Mesa" className="bg-transparent w-full text-center font-black text-xl outline-none" />
+                  <button onClick={() => {
+                     const num = document.getElementById('manualMesa').value;
+                     if(num) window.location.href = `index.html?mesa=${num}`; // Redirige a la app principal
+                  }} className="bg-gray-800 text-white font-black px-6 py-3 rounded-xl active:scale-95 transition-transform whitespace-nowrap">
+                     Ir
+                  </button>
+               </div>
+            </div>
+
+            {/* HISTORIAL */}
+            <div className="mt-10">
+               <h2 className="text-2xl font-black text-gray-800 mb-6 tracking-tight flex items-center gap-2">
+                  <span>🍔</span> Últimos Pedidos
+               </h2>
+               
+               {!user ? (
+                  <p className="text-gray-400 font-bold text-center py-6">Inicia sesión para ver tu historial.</p>
+               ) : historial.length === 0 ? (
+                  <div className="bg-gray-100 p-8 rounded-3xl text-center">
+                     <span className="text-4xl grayscale opacity-50 block mb-3">🧾</span>
+                     <p className="text-gray-500 font-bold">Aún no hay visitas pagadas.</p>
+                  </div>
+               ) : (
+                  <div className="space-y-4">
+                     {historial.map((h) => {
+                        const total = h.items.reduce((acc, item) => acc + (item.cantidad * item.precio_unitario), 0);
+                        return (
+                           <div key={h.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
+                             <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-3">
+                               <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">{formatDate(h.fecha)}</span>
+                               <span className="text-lg font-black text-green-500">{formatMoney(total)}€</span>
+                             </div>
+                             <ul className="text-sm text-gray-700 space-y-2">
+                               {h.items.map((item, idx) => (
+                                 <li key={idx} className="flex gap-3 font-bold items-center">
+                                    <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded-lg text-xs">{item.cantidad}x</span>
+                                    {item.producto?.nombre}
+                                 </li>
+                               ))}
+                             </ul>
+                           </div>
+                        );
+                     })}
+                  </div>
+               )}
+            </div>
+
+          </main>
+
+          {/* MODAL AUTH */}
+          {showAuthModal && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
+              <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
+                <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
+                <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">{authMode === 'login' ? 'Hola' : 'Únete'}</h3>
+                <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta.' : 'Crea tu cuenta para ganar puntos.'}</p>
+                <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
+                <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
+                <button onClick={handleAuth} className={`w-full text-white font-black py-5 rounded-2xl text-xl active:scale-95 transition-transform mb-4 shadow-lg ${authMode === 'login' ? 'bg-red-600 shadow-red-600/30' : 'bg-yellow-400 text-yellow-900 shadow-yellow-400/50'}`}>
+                   {authMode === 'login' ? 'Entrar' : 'Registrarme'}
+                </button>
+                <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-gray-500 font-bold py-3">{authMode === 'login' ? 'No tengo cuenta, crear una' : 'Ya tengo cuenta, iniciar sesión'}</button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<ErrorBoundary><PerfilApp /></ErrorBoundary>);
+  </script>
+</body>
+</html>
