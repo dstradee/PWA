@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Bokalia - Pedidos en Mesa</title>
+  <title>Bokalia - Pide desde tu mesa</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -61,32 +61,27 @@
     ];
 
     function MainApp() {
-      // Vistas y Auth
       const [vistaActual, setVistaActual] = useState('mesa');
       const [mesaParam, setMesaParam] = useState(null);
       const [user, setUser] = useState(null);
       const [userProfile, setUserProfile] = useState(null);
       const [authLoading, setAuthLoading] = useState(true);
       
-      // Datos Base
       const [productos, setProductos] = useState([]);
       const [sesionActiva, setSesionActiva] = useState(null);
       const [mesaBloqueada, setMesaBloqueada] = useState(false);
       const [hostName, setHostName] = useState('');
       
-      // Carritos y Rondas
       const [carrito, setCarrito] = useState([]); 
       const [carritosAmigos, setCarritosAmigos] = useState({}); 
       const [rondasBorrador, setRondasBorrador] = useState([]); 
       const [rondasEnviadas, setRondasEnviadas] = useState([]); 
       const [historial, setHistorial] = useState([]);
       
-      // Upselling y Actividad
       const [ultimoPedido, setUltimoPedido] = useState(null);
       const [ultimaActividad, setUltimaActividad] = useState(Date.now());
       const [productoPendiente, setProductoPendiente] = useState(null);
       
-      // Modales UI
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('login'); 
       const [email, setEmail] = useState('');
@@ -102,8 +97,10 @@
       const [toastMsg, setToastMsg] = useState('');
 
       const channelRef = useRef(null);
+      
+      // ESCUDO ANTI-DUPLICADOS PARA LOS PUNTOS
+      const ticketProcesadoRef = useRef(false);
 
-      // 1. INICIALIZACIÓN
       useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const mesa = urlParams.get('mesa');
@@ -124,7 +121,6 @@
         return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
       }, []);
 
-      // 2. VIGILANTE DE MESA GLOBAL
       useEffect(() => {
         if (!mesaParam || authLoading) return;
         verificarSesionMesa();
@@ -139,7 +135,6 @@
         return () => supabase.removeChannel(globalChannel);
       }, [mesaParam, user, authLoading, sesionActiva]);
 
-      // 3. VIGILANTE EN TIEMPO REAL DEL CARRITO Y PAGOS
       useEffect(() => {
         if (sesionActiva) {
           cargarRondasMesa(sesionActiva.id);
@@ -163,7 +158,6 @@
                cargarRondasMesa(sesionActiva.id);
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sesiones_mesa', filter: `id=eq.${sesionActiva.id}` }, (payload) => {
-               // 🔥 SEÑAL DE COBRO DESDE EL IPAD
                if (payload.new.estado === 'pagada') {
                   cargarTicketFinal(sesionActiva.id);
                }
@@ -174,7 +168,6 @@
         }
       }, [sesionActiva, user]);
 
-      // EFECTO MEMORIA PARA AÑADIR PLATOS PENDIENTES TRAS REGISTRO
       useEffect(() => {
          if (user && productoPendiente && !authLoading) {
             if (!sesionActiva) {
@@ -186,7 +179,6 @@
          }
       }, [user, productoPendiente, authLoading, sesionActiva]);
 
-      // RELOJ INACTIVIDAD
       useEffect(() => {
         if (!sesionActiva || sesionActiva.estado === 'pagada') return;
         const interval = setInterval(() => {
@@ -198,11 +190,6 @@
         return () => clearInterval(interval);
       }, [sesionActiva, ultimaActividad, showTimeoutModal]);
 
-      useEffect(() => {
-        if (vistaActual === 'historial') cargarHistorial();
-      }, [vistaActual, user]);
-
-      // --- FUNCIONES CORE ---
       const procesarUsuario = async (authUser) => {
         setUser(authUser);
         try {
@@ -213,7 +200,6 @@
           }
           setUserProfile(data);
           buscarUltimoPedido(authUser.id);
-          cargarHistorial();
         } catch(e) { setUserProfile({ puntos: 0, email: authUser.email }); }
         setAuthLoading(false);
       };
@@ -222,28 +208,6 @@
         const { data, error } = await supabase.from('productos').select('*').eq('activo', true);
         if (error || !data || data.length === 0) setProductos(MENU_EMERGENCIA);
         else setProductos(data);
-      };
-
-      const cargarHistorial = async () => {
-        if (!user) return;
-        const seisMesesAtras = new Date();
-        seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
-
-        const { data } = await supabase.from('pedidos_rondas')
-          .select('id, fecha, estado, sesion:sesiones_mesa!inner(estado), items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
-          .eq('usuario_id', user.id).eq('oculto_usuario', false).eq('sesiones_mesa.estado', 'pagada')
-          .gte('fecha', seisMesesAtras.toISOString()).order('fecha', { ascending: false });
-          
-        if (data) setHistorial(data.filter(h => h.items && h.items.length > 0));
-      };
-
-      const borrarHistorial = async () => {
-        if (!user || historial.length === 0) return;
-        if (window.confirm("¿Limpiar tu historial visual?")) {
-           await supabase.from('pedidos_rondas').update({ oculto_usuario: true }).eq('usuario_id', user.id);
-           setHistorial([]);
-           mostrarToast("Historial ocultado 🧹");
-        }
       };
 
       const buscarUltimoPedido = async (userId) => {
@@ -292,7 +256,7 @@
       };
 
       const cargarRondasMesa = async (idSesion) => {
-        const { data, error } = await supabase.from('pedidos_rondas')
+        const { data } = await supabase.from('pedidos_rondas')
           .select('*, items:items_pedido(id, cantidad, precio_unitario, producto_id, producto:productos(nombre, precio)), usuario:usuarios(nombre, email)')
           .eq('sesion_id', idSesion).order('fecha', { ascending: true });
           
@@ -312,7 +276,6 @@
         else setShowAuthModal(false); 
       };
 
-      // 🍔 AÑADIR AL CARRITO
       const intentarAñadirAlCarrito = (producto) => {
         if (!user) { 
            setProductoPendiente(producto);
@@ -359,7 +322,6 @@
         } catch(e) { console.error(e); }
       };
 
-      // 🍔 MANDAR A COCINA
       const enviarACocinaDB = async () => {
          if (!sesionActiva || !user) return;
          const miRonda = rondasBorrador.find(r => r.usuario_id === user.id);
@@ -386,8 +348,12 @@
         mostrarToast("El camarero trae la cuenta. ¡Avisado! 💸");
       };
 
-      // 🧾 EL TICKET FINAL Y CÁLCULO SEGURO DE PUNTOS
+      // 🔥 EL TICKET FINAL Y CÁLCULO MÁGICO DE PUNTOS BLINDADO (1€ = 100 PTS)
       const cargarTicketFinal = async (idSesion) => {
+         // Si ya ha pasado por aquí, no sumes doble
+         if (ticketProcesadoRef.current) return;
+         ticketProcesadoRef.current = true;
+
          try {
             if (!user) return salirDeMesa();
 
@@ -400,35 +366,39 @@
                const { data: items } = await supabase.from('items_pedido').select('cantidad, precio_unitario, producto:productos(nombre)').in('ronda_id', rondasIds);
                if (items) {
                   misItems = items;
-                  items.forEach(i => totalGastado += (i.precio_unitario * i.cantidad));
+                  items.forEach(i => {
+                     // Forzamos a JS a que entienda que es un número (evitamos el error de sumar textos)
+                     const precioReal = parseFloat(i.precio_unitario || 0);
+                     const cantidadReal = parseInt(i.cantidad || 1);
+                     totalGastado += (precioReal * cantidadReal);
+                  });
                }
             }
             
-            const puntosGanados = Math.floor(totalGastado * 20);
+            // LA NUEVA REGLA MATEMÁTICA: 1 Euro = 100 Puntos
+            const puntosGanados = Math.floor(totalGastado * 100);
 
-            // SUMA SEGURA EN LA BASE DE DATOS LOCALMENTE
             if (puntosGanados > 0 && user) {
                const { data: bdUser } = await supabase.from('usuarios').select('puntos').eq('id', user.id).single();
-               const puntosActuales = bdUser?.puntos || 0;
+               const puntosActuales = parseInt(bdUser?.puntos) || 0;
+               
                await supabase.from('usuarios').update({ puntos: puntosActuales + puntosGanados }).eq('id', user.id);
                
-               // Refrescamos UI
-               const { data: userData } = await supabase.auth.getUser();
-               if (userData?.user) procesarUsuario(userData.user);
+               // Actualizamos la tarjeta de la pantalla en tiempo real
+               setUserProfile(prev => ({ ...prev, puntos: puntosActuales + puntosGanados }));
             }
 
             setDatosTicket({ subtotal: totalGastado, puntosGanados: puntosGanados, items: misItems });
             setShowTicketModal(true);
          } catch (e) {
-            console.error(e);
+            console.error("Fallo al generar ticket", e);
             setShowReviewModal(true); 
          }
       };
 
-      // 🔥 SALIDA MAESTRA (REDIRECCIÓN AL PERFIL)
-      const finalizarYSalir = () => {
+      const salirDeMesa = () => {
          setShowReviewModal(false);
-         // Magia: Nos manda al Panel del Perfil
+         // Te expulsa a tu PWA principal (el Index 2)
          window.location.href = 'perfil.html'; 
       };
 
@@ -451,13 +421,13 @@
         </div>
       );
 
-      if (mesaBloqueada) {
+      if (mesaBloqueada && mesaParam) {
         return (
           <div className="min-h-screen bg-gray-900 flex flex-col justify-center items-center p-8 text-center text-white animate-fade-in z-50 absolute w-full h-full">
             <div className="text-8xl mb-8">🔒</div>
             <h1 className="text-4xl font-black mb-4">Mesa Cerrada</h1>
             <p className="text-gray-300 font-medium text-lg leading-relaxed mb-12">El host de esta mesa ha seleccionado <b className="text-yellow-400">Cuenta Única</b>. No se admiten más móviles conectados a esta mesa.</p>
-            <button onClick={() => window.location.href = window.location.pathname} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-2xl shadow-xl text-xl">Cambiar de mesa</button>
+            <button onClick={() => window.location.href = 'perfil.html'} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-2xl shadow-xl text-xl">Ir al Inicio</button>
           </div>
         );
       }
@@ -472,7 +442,7 @@
                 const num = document.getElementById('inputMesa').value;
                 if(num) window.location.search = `?mesa=${num}`;
               }} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-[2rem] text-2xl shadow-xl">
-              Empezar a pedir
+              Empezar
             </button>
           </div>
         </div>
@@ -482,7 +452,7 @@
       const totalItemsMesaPendiente = rondasBorrador.reduce((acc, r) => acc + r.items.length, 0);
 
       const totalMesaEnviada = rondasEnviadas.reduce((acc, r) => {
-         return acc + r.items.reduce((sum, item) => sum + (item.cantidad * item.precio_unitario), 0);
+         return acc + r.items.reduce((sum, item) => sum + (parseInt(item.cantidad) * parseFloat(item.precio_unitario)), 0);
       }, 0);
 
       return (
@@ -496,6 +466,7 @@
             </div>
           )}
 
+          {/* OBLIGACIÓN DE UNIRSE A LA MESA */}
           {showJoinPrompt && (
             <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
@@ -503,77 +474,32 @@
                 <h3 className="text-3xl font-black text-gray-800 mb-2">Mesa de {hostName}</h3>
                 <p className="text-gray-500 font-medium text-lg mb-8">Esta mesa ya está abierta. ¿Estás en su grupo?</p>
                 <button onClick={aceptarUnirse} className="w-full bg-yellow-400 text-yellow-900 font-black py-5 rounded-2xl shadow-lg text-xl mb-4 active:scale-95 transition-transform">Sí, unirme a la mesa</button>
-                <button onClick={() => window.location.href = window.location.pathname} className="w-full bg-gray-100 text-gray-600 font-black py-4 rounded-2xl">No, me he equivocado</button>
+                <button onClick={() => window.location.href = 'perfil.html'} className="w-full bg-gray-100 text-gray-600 font-black py-4 rounded-2xl">No, me he equivocado</button>
               </div>
             </div>
           )}
 
           {/* CABECERA */}
-          <header className="bg-red-600 text-white p-4 sticky top-0 z-30 shadow-md flex justify-between items-center">
-            <h1 className="font-black text-2xl text-yellow-400 tracking-tighter">BOKALIA</h1>
-            {user ? (
-               <div className="flex gap-2">
-                 <button onClick={() => window.location.href = 'perfil.html'} className="text-xs font-bold bg-white text-red-600 px-3 py-2 rounded-xl">Mi Perfil</button> 
-                 <button onClick={async () => await supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-3 py-2 rounded-xl">Salir</button> 
-               </div>
-            ) : (
-               <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-black bg-yellow-400 text-red-900 px-5 py-2 rounded-xl shadow-sm">Entrar</button>
-            )}
-          </header>
-
-          {/* TABS SIMPLIFICADAS PARA LA MESA */}
-          <div className="bg-white flex justify-center gap-6 border-b border-gray-200 shadow-sm z-0">
-             <button onClick={() => setVistaActual('mesa')} className={`font-black py-4 px-2 border-b-4 transition-colors ${vistaActual === 'mesa' ? 'border-red-600 text-red-600' : 'border-transparent text-gray-400'}`}>Mesa {mesaParam}</button>
-             <button onClick={() => setVistaActual('historial')} className={`font-black py-4 px-2 border-b-4 transition-colors ${vistaActual === 'historial' ? 'border-red-600 text-red-600' : 'border-transparent text-gray-400'}`}>Historial Local</button>
-          </div>
-
-          {vistaActual === 'historial' && (
-            <div className="p-4 animate-fade-in flex-grow">
-              <h2 className="text-2xl font-black text-gray-800 mb-4 tracking-tight">Tus Pedidos Anteriores</h2>
-              {!user ? (
-                <div className="bg-white p-6 rounded-3xl text-center border-2 border-dashed border-gray-200 mt-10">
-                  <p className="text-gray-500 font-bold mb-4">Inicia sesión para ver tu historial de visitas antiguas.</p>
-                  <button onClick={() => setShowAuthModal(true)} className="bg-red-600 text-white px-6 py-3 rounded-xl font-black">Entrar ahora</button>
-                </div>
-              ) : historial.length === 0 ? (
-                <div className="text-center text-gray-400 mt-20">
-                  <div className="text-5xl mb-4">🍽️</div>
-                  <p className="font-bold">Aún no hay pedidos pagados en tu historial.</p>
-                  <p className="text-xs mt-2 opacity-80">Los pedidos de hoy saldrán aquí cuando el camarero cierre tu cuenta.</p>
-                </div>
+          <header className="bg-red-600 text-white p-4 sticky top-0 z-30 shadow-md">
+            <div className="flex justify-between items-center">
+              <h1 className="font-black text-2xl text-yellow-400 tracking-tighter">BOKALIA</h1>
+              {user ? (
+                 <button onClick={async () => { await supabase.auth.signOut(); window.location.href='perfil.html'; }} className="text-xs font-bold bg-red-800 px-3 py-2 rounded-xl">Cerrar Sesión</button> 
               ) : (
-                <div className="space-y-4">
-                  {historial.map((h, i) => {
-                     const total = h.items.reduce((acc, item) => acc + (item.cantidad * item.precio_unitario), 0);
-                     return (
-                        <div key={h.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
-                          <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-3">
-                            <span className="text-xs font-bold text-gray-400">{formatDate(h.fecha)}</span>
-                            <div className="flex items-center gap-2">
-                               <span className="text-lg font-black text-green-500">{formatMoney(total)}€</span>
-                            </div>
-                          </div>
-                          <ul className="text-sm text-gray-700 space-y-2">
-                            {h.items.map((item, idx) => (
-                              <li key={idx} className="flex gap-2 font-medium">
-                                 <span className="text-red-500 font-black">{item.cantidad}x</span>
-                                 {item.producto?.nombre}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                     );
-                  })}
-                  <button onClick={borrarHistorial} className="w-full mt-8 bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl active:bg-gray-200 transition-colors">Limpiar mi historial visual</button>
-                </div>
+                 <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-black bg-yellow-400 text-red-900 px-5 py-2 rounded-xl shadow-sm">Entrar</button>
               )}
             </div>
-          )}
+            {/* TABS NAVEGACIÓN */}
+            <div className="flex gap-3 border-t border-red-500 pt-3 mt-3 overflow-x-auto">
+              <button onClick={() => setVistaActual('mesa')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='mesa' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Mesa {mesaParam}</button>
+              <button onClick={() => window.location.href='perfil.html'} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 border-transparent text-red-200`}>Mi Perfil</button>
+            </div>
+          </header>
 
+          {/* VISTA MESA PRINCIPAL */}
           {vistaActual === 'mesa' && mesaParam && (
             <div className="animate-fade-in flex-grow relative">
               
-              {/* TARJETA DE PUNTOS EN MESA */}
               <div className="m-4">
                 {!user ? (
                   <div className="relative overflow-hidden rounded-[2rem] p-6 shadow-lg bg-gradient-to-br from-gray-700 to-gray-900 text-white cursor-pointer" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
@@ -585,10 +511,11 @@
                     <div className="opacity-20 blur-sm pointer-events-none">
                         <p className="text-[10px] font-bold uppercase mb-1">Bokalia Wallet</p>
                         <p className="text-3xl font-black mb-4">0 pts</p>
+                        <div className="h-3 w-full bg-white/20 rounded-full"></div>
                     </div>
                   </div>
                 ) : (
-                  <div className="relative overflow-hidden rounded-[2.5rem] p-6 shadow-xl bg-gradient-to-br from-yellow-400 to-yellow-500 text-yellow-900">
+                  <div className="relative overflow-hidden rounded-[2rem] p-6 shadow-xl bg-gradient-to-br from-yellow-400 to-yellow-500 text-yellow-900">
                     <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-white opacity-20"></div>
                     <div className="relative z-10 flex justify-between items-start mb-6">
                       <div>
@@ -596,7 +523,7 @@
                         <p className="text-4xl font-black tracking-tighter">{userProfile?.puntos || 0} <span className="text-lg font-bold opacity-80">pts</span></p>
                       </div>
                       <div className="bg-white/40 backdrop-blur-md px-3 py-1.5 rounded-xl text-xs font-black uppercase shadow-sm border border-white/50">
-                        {(userProfile?.puntos||0) > 500 ? 'VIP ORO' : 'VIP BRONCE'}
+                        {(userProfile?.puntos||0) > 1500 ? 'VIP ORO' : 'VIP BRONCE'}
                       </div>
                     </div>
                     <div className="relative z-10">
@@ -613,11 +540,13 @@
               </div>
 
               <div className="p-4">
-                {/* 🛒 BORRADOR */}
+                
+                {/* 🛒 BORRADOR DE LA MESA */}
                 {rondasBorrador.length > 0 && (
                   <div className="mb-10 bg-orange-50 p-5 rounded-[2rem] border-2 border-orange-200 shadow-md animate-fade-in">
                     <h2 className="text-xl font-black text-orange-900 mb-4 flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 bg-orange-500 rounded-full animate-ping"></span> Borrador de la Mesa
+                      <span className="w-2.5 h-2.5 bg-orange-500 rounded-full animate-ping"></span>
+                      Borrador de la Mesa
                     </h2>
                     
                     {rondasBorrador.map(ronda => (
@@ -778,7 +707,7 @@
             </div>
           )}
 
-          {/* 🧾 TICKET FINAL Y CÁLCULO SEGURO */}
+          {/* 🧾 TICKET FINAL AL PAGAR */}
           {showTicketModal && (
             <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
@@ -792,7 +721,7 @@
                    {datosTicket.items.map((it, i) => (
                       <div key={i} className="flex justify-between text-sm font-bold text-gray-700 mb-1">
                          <span>{it.cantidad}x {it.producto?.nombre}</span>
-                         <span>{(it.cantidad * it.precio_unitario).toFixed(2)}€</span>
+                         <span>{(parseFloat(it.precio_unitario) * parseInt(it.cantidad)).toFixed(2)}€</span>
                       </div>
                    ))}
                    <div className="flex justify-between items-end mt-4 pt-3 border-t border-gray-200">
@@ -806,8 +735,11 @@
                    <p className="text-xs font-medium mt-1">Se han sumado a tu Wallet universal.</p>
                 </div>
 
-                <button onClick={finalizarYSalir} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl shadow-lg text-xl active:scale-95 transition-transform">
-                   Finalizar y salir
+                <button onClick={() => {
+                   setShowTicketModal(false);
+                   setShowReviewModal(true);
+                }} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl shadow-lg text-xl active:scale-95 transition-transform">
+                   Continuar
                 </button>
               </div>
             </div>
@@ -829,14 +761,14 @@
           )}
           
           {showReviewModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up">
                 <div className="text-5xl mb-4">⭐</div>
                 <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Qué tal la comida?</h3>
                 <p className="text-sm text-gray-500 mb-8 font-medium">Toca las estrellas para valorarnos.</p>
                 <div className="flex justify-center gap-3 mb-10">
                   {[1,2,3,4,5].map(star => (
-                    <button key={star} onClick={() => { window.open('https://maps.google.com', '_blank'); finalizarYSalir(); }} className="text-5xl text-yellow-400 active:scale-75 transition-transform">★</button>
+                    <button key={star} onClick={finalizarYSalir} className="text-5xl text-yellow-400 active:scale-75 transition-transform">★</button>
                   ))}
                 </div>
                 <button onClick={finalizarYSalir} className="text-sm font-bold text-gray-400 uppercase tracking-widest">Saltar y Salir</button>
