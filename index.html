@@ -31,7 +31,7 @@
 
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
-    const TIEMPO_LIMITE_MINUTOS = 120; 
+    const TIEMPO_LIMITE_MINUTOS = 120; // 2 Horas
 
     class ErrorBoundary extends React.Component {
       constructor(props) { super(props); this.state = { hasError: false, error: null }; }
@@ -54,6 +54,11 @@
       'sb_publishable_oIWpn-mNPUZaQPdf7HNU_Q_Lc7R6UOB',
       { auth: { persistSession: true, storage: window.localStorage, autoRefreshToken: true } }
     );
+
+    const MENU_EMERGENCIA = [
+      { id: '11111111-1111-1111-1111-111111111111', nombre: 'Bokata Clásico', precio: 5.50, imagen_url: 'https://images.unsplash.com/photo-1619881589316-56c7f9e6b587?w=500', categoria: 'Bocadillos' },
+      { id: '22222222-2222-2222-2222-222222222222', nombre: 'Burger Doble', precio: 8.90, imagen_url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500', categoria: 'Hamburguesas' }
+    ];
 
     function MainApp() {
       const [vistaActual, setVistaActual] = useState('mesa');
@@ -153,7 +158,7 @@
                cargarRondasMesa(sesionActiva.id);
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sesiones_mesa', filter: `id=eq.${sesionActiva.id}` }, (payload) => {
-               // 🧾 ESTA ES LA SEÑAL QUE ESTÁBAMOS ESPERANDO DEL IPAD
+               // ✅ EL IPAD DEL CAMARERO DA LA ORDEN, Y EL MÓVIL SACA EL TICKET Y DA LOS PUNTOS
                if (payload.new.estado === 'pagada') {
                   cargarTicketFinal(sesionActiva.id);
                }
@@ -208,7 +213,7 @@
 
       const pedirNotificaciones = async () => {
         if (!('Notification' in window)) {
-          alert("🍏 Si estás en iPhone: Pulsa 'Compartir' (el cuadrado con la flecha) y dale a 'Añadir a la pantalla de inicio'.");
+          alert("🍏 Si estás en iPhone: Pulsa 'Compartir' y 'Añadir a la pantalla de inicio'.");
           return;
         }
         try {
@@ -220,7 +225,8 @@
 
       const cargarMenu = async () => {
         const { data, error } = await supabase.from('productos').select('*').eq('activo', true);
-        if (data) setProductos(data);
+        if (error || !data || data.length === 0) setProductos(MENU_EMERGENCIA);
+        else setProductos(data);
       };
 
       const cargarHistorial = async () => {
@@ -368,7 +374,7 @@
                .select('id').eq('sesion_id', sesionActiva.id).eq('estado', 'pendiente');
                
             if (pendientes && pendientes.length > 0) {
-               mostrarToast("¡Estás listo! Esperando a tus amigos... ⏳");
+               mostrarToast("¡Tú estás listo! Esperando a tus amigos... ⏳");
             } else {
                await supabase.from('pedidos_rondas').update({estado: 'enviado', fecha: new Date().toISOString()})
                   .eq('sesion_id', sesionActiva.id).eq('estado', 'listo');
@@ -377,16 +383,16 @@
          } catch(e) { console.error(e); }
       };
 
+      // 🛑 EL ARREGLO: Ya no hay `setTimeout` que auto-cierra la mesa. Esperamos eternamente al iPad.
       const pedirCuenta = async () => {
         if (!sesionActiva) return;
         await supabase.from('sesiones_mesa').update({ estado: 'pagando' }).eq('id', sesionActiva.id);
         mostrarToast("El camarero trae la cuenta. ¡Avisado! 💸");
       };
 
-      // 🧾 CARGAR TICKET AL DETECTAR QUE EL CAMARERO HA COBRADO
+      // 🧾 GENERAR EL TICKET FINAL AL CERRAR DESDE EL IPAD
       const cargarTicketFinal = async (idSesion) => {
          try {
-            // Buscamos lo que realmente se ha enviado y servido
             const { data: misRondas } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', idSesion).eq('usuario_id', user.id).in('estado', ['enviado', 'preparando', 'servido']);
             let totalGastado = 0;
             let misItems = [];
@@ -400,11 +406,11 @@
                }
             }
             
-            // Calculamos puntos y los sumamos
+            // Calculo los puntos reales para darlos
             const puntosGanados = Math.floor(totalGastado * 20);
             if (puntosGanados > 0 && user) {
                await supabase.from('usuarios').update({ puntos: (userProfile?.puntos || 0) + puntosGanados }).eq('id', user.id);
-               // Refrescamos UI
+               // Refrescar UI Puntos
                const { data: userData } = await supabase.auth.getUser();
                if (userData?.user) procesarUsuario(userData.user);
             }
@@ -413,12 +419,11 @@
             setShowTicketModal(true);
          } catch (e) {
             console.error(e);
-            // Si falla, pasamos directo al review para no bloquear
             setShowReviewModal(true); 
          }
       };
 
-      // 🔄 RESET DE HIERRO: Limpia la URL, la caché y todo rastro de la mesa
+      // RESET TOTAL (Cierra Modal Reseñas y limpia la URL)
       const finalizarYSalir = () => {
          setShowReviewModal(false);
          window.location.href = window.location.pathname; 
@@ -429,6 +434,7 @@
         const d = new Date(dateStr);
         return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} a las ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
       };
+
       const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
 
       // ==========================================
@@ -448,7 +454,7 @@
             <div className="text-8xl mb-8">🔒</div>
             <h1 className="text-4xl font-black mb-4">Mesa Cerrada</h1>
             <p className="text-gray-300 font-medium text-lg leading-relaxed mb-12">El host de esta mesa ha seleccionado <b className="text-yellow-400">Cuenta Única</b>. No se admiten más móviles conectados a esta mesa.</p>
-            <button onClick={() => window.location.href = window.location.pathname} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-2xl shadow-xl text-xl">Cambiar de mesa</button>
+            <button onClick={() => window.location.search=''} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-2xl shadow-xl text-xl">Cambiar de mesa</button>
           </div>
         );
       }
@@ -487,7 +493,7 @@
             </div>
           )}
 
-          {/* OBLIGACIÓN DE UNIRSE A LA MESA */}
+          {/* UNIRSE A MESA OBLIGATORIO */}
           {showJoinPrompt && (
             <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
@@ -495,7 +501,7 @@
                 <h3 className="text-3xl font-black text-gray-800 mb-2">Mesa de {hostName}</h3>
                 <p className="text-gray-500 font-medium text-lg mb-8">Esta mesa ya está abierta. ¿Estás en su grupo?</p>
                 <button onClick={aceptarUnirse} className="w-full bg-yellow-400 text-yellow-900 font-black py-5 rounded-2xl shadow-lg text-xl mb-4 active:scale-95 transition-transform">Sí, unirme a la mesa</button>
-                <button onClick={() => window.location.href = window.location.pathname} className="w-full bg-gray-100 text-gray-600 font-black py-4 rounded-2xl">No, me he equivocado</button>
+                <button onClick={() => window.location.search=''} className="w-full bg-gray-100 text-gray-600 font-black py-4 rounded-2xl">No, me he equivocado</button>
               </div>
             </div>
           )}
@@ -510,7 +516,6 @@
                  <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-black bg-yellow-400 text-red-900 px-5 py-2 rounded-xl shadow-sm">Entrar</button>
               )}
             </div>
-            {/* TABS NAVEGACIÓN */}
             <div className="flex gap-3 border-t border-red-500 pt-3 mt-3 overflow-x-auto">
               <button onClick={() => setVistaActual('mesa')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='mesa' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Mesa {mesaParam}</button>
               <button onClick={() => setVistaActual('historial')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='historial' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Historial</button>
@@ -645,7 +650,7 @@
 
               <div className="p-4">
                 
-                {/* 🛒 BORRADOR DE LA MESA (100% DB EN TIEMPO REAL) */}
+                {/* 🛒 BORRADOR DE LA MESA */}
                 {rondasBorrador.length > 0 && (
                   <div className="mb-10 bg-orange-50 p-5 rounded-[2rem] border-2 border-orange-200 shadow-md animate-fade-in">
                     <h2 className="text-xl font-black text-orange-900 mb-4 flex items-center gap-2">
@@ -709,7 +714,7 @@
                   ))}
                 </div>
 
-                {/* 🧾 LA CUENTA DE LA MESA (Pedidos enviados) */}
+                {/* 🧾 LA CUENTA DE LA MESA */}
                 {rondasEnviadas.length > 0 && (
                   <div className="mb-8">
                     <div className="flex justify-between items-center mb-4 ml-1">
@@ -773,7 +778,7 @@
             </div>
           )}
 
-          {/* MODAL AUTH */}
+          {/* MODALES ABSOLUTES */}
           {showAuthModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
               <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
@@ -790,7 +795,6 @@
             </div>
           )}
 
-          {/* MODAL MODO MESA */}
           {showModoMesa && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up text-center">
@@ -812,7 +816,7 @@
             </div>
           )}
 
-          {/* 🧾 TICKET FINAL */}
+          {/* 🧾 TICKET MODAL */}
           {showTicketModal && (
             <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
@@ -840,14 +844,16 @@
                    <p className="text-xs font-medium mt-1">Se han sumado a tu Wallet universal.</p>
                 </div>
 
-                <button onClick={() => { setShowTicketModal(false); setShowReviewModal(true); }} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl shadow-lg text-xl active:scale-95 transition-transform">
+                <button onClick={() => {
+                   setShowTicketModal(false);
+                   setShowReviewModal(true);
+                }} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl shadow-lg text-xl active:scale-95 transition-transform">
                    Continuar
                 </button>
               </div>
             </div>
           )}
 
-          {/* VIGILANTE INACTIVIDAD */}
           {showTimeoutModal && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up">
@@ -863,7 +869,6 @@
             </div>
           )}
           
-          {/* RESEÑAS Y RESET */}
           {showReviewModal && (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up">
