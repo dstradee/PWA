@@ -12,22 +12,34 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
-    body { font-family: system-ui, sans-serif; background: #0f172a; margin: 0; user-select: none; }
+    body { font-family: system-ui, sans-serif; background: #f3f4f6; margin: 0; user-select: none; }
+    
     /* Animación de entrada de Ticket */
-    @keyframes popIn { 0% { opacity: 0; transform: scale(0.9); } 100% { opacity: 1; transform: scale(1); } }
+    @keyframes popIn { 0% { opacity: 0; transform: scale(0.9) translateY(20px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
     .ticket-enter { animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
     
-    /* Animación de salida (Deslizar hacia arriba) */
-    @keyframes slideOutUp { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-50px); } }
+    /* Animación de salida (Deslizar hacia arriba y desaparecer) */
+    @keyframes slideOutUp { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(-50px) scale(0.9); } }
     .ticket-exit { animation: slideOutUp 0.3s ease forwards; }
 
     /* Parpadeo urgente (Más de 15 min) */
-    @keyframes urgentPulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+    @keyframes urgentPulse { 
+       0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 
+       70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); } 
+       100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } 
+    }
     .ticket-urgente { animation: urgentPulse 1.5s infinite; border-color: #ef4444 !important; }
   </style>
 </head>
-<body>
-  <div id="root"></div>
+<body class="bg-gray-100 min-h-screen">
+  
+  <div id="root">
+     <!-- PANTALLA NATIVA DE CARGA: Si React falla, se queda esto -->
+     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; color:#dc2626;">
+       <h1 style="font-size:3rem; font-weight:900;">BOKALIA KDS</h1>
+       <p style="font-weight:bold; margin-top:10px;">Iniciando panel de cocina...</p>
+     </div>
+  </div>
 
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
@@ -37,7 +49,9 @@
       'sb_publishable_oIWpn-mNPUZaQPdf7HNU_Q_Lc7R6UOB'
     );
 
-    // COMPONENTE DE TICKET INDIVIDUAL
+    // ==========================================
+    // COMPONENTE: TICKET DE COMANDA INDIVIDUAL
+    // ==========================================
     const ComandaTicket = ({ ronda, onCompletar }) => {
       const [minutos, setMinutos] = useState(0);
       const [saliendo, setSaliendo] = useState(false);
@@ -45,22 +59,24 @@
       // Calculador de tiempo transcurrido
       useEffect(() => {
         const calcularTiempo = () => {
+           if (!ronda?.fecha) return;
            const diffMs = Date.now() - new Date(ronda.fecha).getTime();
            setMinutos(Math.floor(diffMs / 60000));
         };
         calcularTiempo();
-        const intervalo = setInterval(calcularTiempo, 10000); // Actualiza cada 10 seg
+        const intervalo = setInterval(calcularTiempo, 10000); // Actualiza visualmente cada 10 seg
         return () => clearInterval(intervalo);
-      }, [ronda.fecha]);
+      }, [ronda?.fecha]);
 
       const handleListo = () => {
          setSaliendo(true);
-         setTimeout(() => onCompletar(ronda.id), 300); // Espera la animación antes de borrar
+         // Esperamos 300ms para que se vea la animación de salida antes de borrarlo
+         setTimeout(() => onCompletar(ronda.id), 300); 
       };
 
-      // Lógica de Urgencia (FIFO Visual)
+      // Lógica de Urgencia (Colores visuales)
       let colorBorde = 'border-gray-300';
-      let colorFondoCabecera = 'bg-gray-100 text-gray-800';
+      let colorFondoCabecera = 'bg-gray-200 text-gray-800';
       let claseUrgencia = '';
 
       if (minutos >= 15) {
@@ -72,31 +88,34 @@
          colorFondoCabecera = 'bg-amber-500 text-white';
       }
 
-      const horaEntrada = new Date(ronda.fecha).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      // Parche de seguridad para que nunca crashee si la fecha está rota
+      const horaEntrada = ronda?.fecha ? new Date(ronda.fecha).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : '--:--';
+      const numMesa = ronda?.sesion?.num_mesa || '?';
+      const ticketId = ronda?.id ? ronda.id.split('-')[0] : '000';
 
       return (
-         <div className={`bg-white rounded-xl shadow-lg border-4 flex flex-col h-full transition-colors ${colorBorde} ${saliendo ? 'ticket-exit' : 'ticket-enter'} ${claseUrgencia}`}>
+         <div className={`bg-white rounded-2xl shadow-xl border-4 flex flex-col h-full transition-colors ${colorBorde} ${saliendo ? 'ticket-exit' : 'ticket-enter'} ${claseUrgencia}`}>
             
             {/* CABECERA */}
-            <div className={`px-4 py-3 flex justify-between items-center ${colorFondoCabecera}`}>
+            <div className={`px-5 py-4 flex justify-between items-center ${colorFondoCabecera} rounded-t-xl`}>
                <div>
-                  <h3 className="text-3xl font-black leading-none">Mesa {ronda.sesion?.num_mesa || '?'}</h3>
-                  <p className="text-xs font-bold uppercase tracking-widest opacity-90 mt-1">Ticket #{ronda.id.split('-')[0]}</p>
+                  <h3 className="text-4xl font-black leading-none tracking-tighter">Mesa {numMesa}</h3>
+                  <p className="text-xs font-bold uppercase tracking-widest opacity-90 mt-1">Ticket #{ticketId}</p>
                </div>
                <div className="text-right">
-                  <p className="text-2xl font-black">{minutos}'</p>
+                  <p className="text-3xl font-black">{minutos}'</p>
                   <p className="text-xs font-bold opacity-80">{horaEntrada}</p>
                </div>
             </div>
 
             {/* CUERPO DEL TICKET (COMIDA) */}
-            <div className="p-4 flex-grow bg-[#fffdf8]">
-               <ul className="space-y-3">
-                  {ronda.items?.map((item, idx) => (
-                     <li key={idx} className="flex items-start gap-3 border-b border-gray-200 border-dashed pb-3 last:border-0 last:pb-0">
-                        <span className="text-xl font-black text-red-600 w-8 text-center">{item.cantidad}x</span>
-                        <div className="flex-grow">
-                           <span className="text-lg font-bold text-gray-900 leading-tight">{item.producto?.nombre}</span>
+            <div className="p-5 flex-grow bg-[#fffdf8] overflow-y-auto">
+               <ul className="space-y-4">
+                  {ronda?.items?.map((item, idx) => (
+                     <li key={idx} className="flex items-start gap-4 border-b border-gray-200 border-dashed pb-4 last:border-0 last:pb-0">
+                        <span className="text-2xl font-black text-red-600 w-10 text-center bg-red-100 rounded-lg py-1">{item.cantidad}x</span>
+                        <div className="flex-grow pt-1">
+                           <span className="text-xl font-black text-gray-900 leading-tight">{item.producto?.nombre || 'Producto'}</span>
                         </div>
                      </li>
                   ))}
@@ -104,9 +123,9 @@
             </div>
 
             {/* PIE DEL TICKET (ACCIÓN) */}
-            <div className="p-3 bg-gray-50 border-t border-gray-200">
-               <button onClick={handleListo} className="w-full bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-black text-2xl py-4 rounded-xl shadow-md transition-transform active:scale-95 flex items-center justify-center gap-2">
-                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+            <div className="p-4 bg-gray-50 border-t border-gray-200 rounded-b-xl">
+               <button onClick={handleListo} className="w-full bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-black text-2xl py-5 rounded-xl shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-3">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" d="M5 13l4 4L19 7"></path></svg>
                   MARCAR LISTO
                </button>
             </div>
@@ -115,32 +134,40 @@
     };
 
 
+    // ==========================================
+    // COMPONENTE PRINCIPAL: PANEL DE COCINA
+    // ==========================================
     function CocinaPanel() {
       const [rondas, setRondas] = useState([]);
       const [audioUnlock, setAudioUnlock] = useState(false);
       const [conexionDb, setConexionDb] = useState('conectando');
+      const [errorGlobal, setErrorGlobal] = useState(null);
       
       const audioCtxRef = useRef(null);
 
-      // 1. ACTIVAR SONIDO AL ENTRAR (Bypassa restricciones de navegador)
+      // 1. ACTIVAR SONIDO AL ENTRAR (Bypassa restricciones de Apple/Chrome)
       const inicializarCocina = () => {
-         const AudioContext = window.AudioContext || window.webkitAudioContext;
-         audioCtxRef.current = new AudioContext();
-         const osc = audioCtxRef.current.createOscillator();
-         osc.connect(audioCtxRef.current.destination);
-         osc.start();
-         osc.stop(audioCtxRef.current.currentTime + 0.01);
-         setAudioUnlock(true);
+         try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtxRef.current = new AudioContext();
+            const osc = audioCtxRef.current.createOscillator();
+            osc.connect(audioCtxRef.current.destination);
+            osc.start();
+            osc.stop(audioCtxRef.current.currentTime + 0.01);
+            setAudioUnlock(true);
+         } catch(e) {
+            console.error(e);
+            setAudioUnlock(true); // Lo dejamos pasar aunque falle el audio
+         }
       };
 
-      // 2. TIMBRE DE COCINA (Web Audio API) - Sonido de "Campana de Servicio"
+      // 2. TIMBRE DE COCINA (Doble "Ding" de campana de restaurante)
       const playCocinaBell = () => {
          if (!audioCtxRef.current || audioCtxRef.current.state !== 'running') return;
          
          const ctx = audioCtxRef.current;
          const t = ctx.currentTime;
          
-         // Genera un 'Ding' doble muy limpio
          const ding = (timeOffset) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
@@ -148,8 +175,8 @@
             gain.connect(ctx.destination);
             
             osc.type = 'sine';
-            osc.frequency.setValueAtTime(1046.50, t + timeOffset); // Nota C6
-            gain.gain.setValueAtTime(0.5, t + timeOffset);
+            osc.frequency.setValueAtTime(1046.50, t + timeOffset); // Nota aguda de campana
+            gain.gain.setValueAtTime(0.6, t + timeOffset);
             gain.gain.exponentialRampToValueAtTime(0.01, t + timeOffset + 0.8);
             
             osc.start(t + timeOffset);
@@ -157,10 +184,10 @@
          };
 
          ding(0);
-         ding(0.15); // Doble ding
+         ding(0.15); 
       };
 
-      // 3. CARGAR COMANDAS PENDIENTES (FIFO - Más antiguas primero)
+      // 3. CARGAR COMANDAS PENDIENTES (Lógica a prueba de fallos)
       const cargarComandas = async () => {
          try {
             const { data, error } = await supabase.from('pedidos_rondas')
@@ -170,29 +197,35 @@
                   items:items_pedido(cantidad, producto:productos(nombre))
                `)
                .eq('estado', 'enviado') // Solo las que mandó el cliente
-               .order('fecha', { ascending: true }); // FIFO estricto
+               .order('fecha', { ascending: true }); 
                
             if (error) throw error;
-            setRondas(data.filter(r => r.items.length > 0 && r.sesion)); // Filtro de seguridad
+
+            // Filtro de seguridad brutal: Ignora pedidos rotos de pruebas antiguas
+            const rondasValidas = data.filter(r => r.items && r.items.length > 0 && r.sesion);
+            
+            setRondas(rondasValidas);
             setConexionDb('conectado');
+            setErrorGlobal(null);
          } catch(e) {
             console.error("Error DB:", e);
             setConexionDb('desconectado');
+            setErrorGlobal(e.message);
          }
       };
 
-      // 4. WEBSOCKETS (Escuchar nuevos pedidos)
+      // 4. WEBSOCKETS (Escuchar nuevos pedidos al instante)
       useEffect(() => {
          if (!audioUnlock) return;
          cargarComandas();
 
          const canalCocina = supabase.channel('cocina_sync')
-            // Escucha cuando una ronda pasa a estado 'enviado' (Nueva Comanda)
+            // Cuando un cliente manda a cocina (Pasa a estado 'enviado')
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pedidos_rondas', filter: "estado=eq.enviado" }, async (payload) => {
                await cargarComandas();
-               playCocinaBell(); // ¡SUENA LA CAMPANA!
+               playCocinaBell(); // ¡SUENA LA CAMPANA! 🔔
             })
-            // Escucha si algún compañero de cocina la borra/completa en otra pantalla
+            // Cuando nosotros (u otra pantalla de cocina) la marca como terminada
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pedidos_rondas' }, (payload) => {
                if (payload.new.estado !== 'enviado') {
                   setRondas(prev => prev.filter(r => r.id !== payload.new.id));
@@ -203,7 +236,7 @@
                else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setConexionDb('desconectado');
             });
 
-         // Inyección de Cafeína para que la pantalla nunca se duerma
+         // Inyección de Cafeína: Ping cada 15s para que la tablet nunca se desconecte del Wi-Fi
          const pingInterval = setInterval(async () => {
             const { error } = await supabase.from('productos').select('id').limit(1);
             if (error) setConexionDb('desconectado');
@@ -216,70 +249,74 @@
          };
       }, [audioUnlock, conexionDb]);
 
-      // 5. ACCIÓN: MARCAR COMO LISTO (TERMINADO)
+      // 5. ACCIÓN: MARCAR COMO LISTO (Servido)
       const handleCompletarComanda = async (rondaId) => {
-         // Eliminación optimista de la UI para mayor fluidez
+         // Borramos de la pantalla al instante para UX fluida
          setRondas(prev => prev.filter(r => r.id !== rondaId));
 
-         // Actualización silenciosa en la base de datos (Pasa a servido/listo)
+         // Y por detrás actualizamos la base de datos a 'servido'
          try {
             await supabase.from('pedidos_rondas').update({ estado: 'servido' }).eq('id', rondaId);
-            // Al actualizar a 'servido', el móvil del cliente lo recibirá en su historial
          } catch (error) {
             console.error("Error al completar ronda:", error);
+            cargarComandas(); // Si falla en la nube, lo devolvemos a la pantalla
          }
       };
 
-      // --- PANTALLA DE BLOQUEO AUDIO ---
+      // --- PANTALLA DE BLOQUEO DE AUDIO (Requerida por navegadores) ---
       if (!audioUnlock) {
          return (
-            <div className="h-screen bg-gray-900 flex flex-col items-center justify-center p-6 text-center text-white">
-               <div className="text-8xl mb-8">👨‍🍳</div>
-               <h1 className="text-5xl font-black mb-4 tracking-tighter">SISTEMA KDS BOKALIA</h1>
-               <p className="text-gray-400 mb-12 text-xl max-w-lg font-medium">Toca el botón para inicializar la pantalla de cocina y activar el timbre de pedidos.</p>
-               <button onClick={inicializarCocina} className="bg-green-500 hover:bg-green-600 active:scale-95 text-white font-black text-2xl py-6 px-16 rounded-[2rem] shadow-[0_10px_30px_rgba(34,197,94,0.4)] transition-all">
-                  ACTIVAR COCINA
+            <div className="h-screen bg-gray-50 flex flex-col items-center justify-center p-6 text-center text-gray-900 border-[10px] border-red-600">
+               <div className="text-8xl mb-8 animate-bounce">👨‍🍳</div>
+               <h1 className="text-5xl font-black mb-4 tracking-tighter text-red-600">SISTEMA KDS BOKALIA</h1>
+               <p className="text-gray-500 mb-12 text-xl max-w-lg font-bold">Panel de Cocina y recepción de comandas.</p>
+               <button onClick={inicializarCocina} className="bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-2xl py-6 px-16 rounded-[2rem] shadow-2xl transition-all flex items-center gap-4">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  EMPEZAR TURNO
                </button>
             </div>
          );
       }
 
-      // --- PANTALLA KDS PRINCIPAL ---
+      // --- PANTALLA PRINCIPAL DE LA COCINA ---
       return (
-         <div className="min-h-screen bg-gray-900 flex flex-col overflow-hidden">
+         <div className="min-h-screen bg-gray-200 flex flex-col overflow-hidden">
             
-            {/* CABECERA OSCURA TIPO PANEL */}
-            <header className="bg-black text-white p-4 flex justify-between items-center border-b border-gray-800">
+            {/* CABECERA LUMINOSA */}
+            <header className="bg-white text-gray-900 p-5 shadow-sm flex justify-between items-center z-10">
                <div className="flex items-center gap-4">
-                  <h1 className="text-3xl font-black tracking-widest text-red-600">BOKALIA <span className="text-white opacity-50">| KDS</span></h1>
+                  <h1 className="text-3xl font-black tracking-widest text-red-600">BOKALIA <span className="text-gray-300">| COCINA</span></h1>
                </div>
                
                <div className="flex items-center gap-6">
-                  <div className="text-right">
-                     <p className="text-2xl font-black leading-none">{rondas.length}</p>
-                     <p className="text-[10px] uppercase font-bold text-gray-400 tracking-widest">En Cola</p>
+                  {errorGlobal && <span className="text-red-600 font-bold bg-red-100 px-3 py-1 rounded-lg">Error: {errorGlobal}</span>}
+                  
+                  <div className="text-right border-r border-gray-300 pr-6">
+                     <p className="text-3xl font-black leading-none">{rondas.length}</p>
+                     <p className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">En Cola</p>
                   </div>
                   
-                  <div className="flex items-center gap-2 bg-gray-800 px-4 py-2 rounded-full border border-gray-700">
-                     <span className={`w-3 h-3 rounded-full ${conexionDb === 'conectado' ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-red-500 animate-pulse'}`}></span>
-                     <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">
-                        {conexionDb === 'conectado' ? 'DB ACTIVA' : 'RECONECTANDO...'}
+                  <div className="flex items-center gap-3 bg-gray-100 px-5 py-2.5 rounded-full border border-gray-200 shadow-inner">
+                     <span className={`w-4 h-4 rounded-full ${conexionDb === 'conectado' ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-red-500 animate-pulse'}`}></span>
+                     <span className="text-sm font-black text-gray-600 uppercase tracking-widest">
+                        {conexionDb === 'conectado' ? 'SISTEMA ACTIVO' : 'RECONECTANDO...'}
                      </span>
                   </div>
                </div>
             </header>
 
-            {/* CUADRÍCULA DE COMANDAS (Hacia la derecha tipo Trello/Jira) */}
+            {/* CUADRÍCULA DE COMANDAS (Scroll horizontal) */}
             <main className="p-6 flex-grow overflow-x-auto overflow-y-hidden">
                {rondas.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center opacity-30">
-                     <span className="text-9xl mb-6">☕</span>
-                     <p className="text-3xl font-black text-white">Cocina despejada</p>
+                  <div className="h-full flex flex-col items-center justify-center opacity-40">
+                     <span className="text-9xl mb-6 grayscale">🍽️</span>
+                     <p className="text-4xl font-black text-gray-500 tracking-tighter">Cocina despejada</p>
+                     <p className="text-gray-400 font-bold mt-2">Esperando nuevas comandas...</p>
                   </div>
                ) : (
                   <div className="flex gap-6 h-full items-start" style={{ width: "max-content" }}>
                      {rondas.map(ronda => (
-                        <div key={ronda.id} className="w-80 shrink-0 h-full max-h-[85vh]">
+                        <div key={ronda.id} className="w-[22rem] shrink-0 h-full max-h-[85vh]">
                            <ComandaTicket ronda={ronda} onCompletar={handleCompletarComanda} />
                         </div>
                      ))}
@@ -291,7 +328,7 @@
     }
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<ErrorBoundary><CocinaPanel /></ErrorBoundary>);
+    root.render(<CocinaPanel />);
   </script>
 </body>
 </html>
