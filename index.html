@@ -33,7 +33,7 @@
     const { useState, useEffect, useRef } = React;
     const TIEMPO_LIMITE_MINUTOS = 120; // 2 Horas
 
-    // 🔥 TU ID DE RESTAURANTE (EL CEREBRO DE LA MARCA BLANCA)
+    // 🔥 EL ID DE TU RESTAURANTE (Bokalia)
     const RESTAURANTE_ID = 'a5f65b60-0a06-4ed3-9c40-fbbf5f85901a';
 
     class ErrorBoundary extends React.Component {
@@ -45,7 +45,7 @@
               <div className="text-6xl mb-4">🚨</div>
               <h1 className="text-2xl font-black text-red-600 mb-2">Error Crítico</h1>
               <p className="text-gray-700 text-sm mb-6">{this.state.error.toString()}</p>
-              <button onClick={() => window.location.reload()} className="bg-red-600 text-white font-bold py-3 px-6 rounded-xl">Recargar App</button>
+              <button onClick={() => window.location.href='perfil.html'} className="bg-red-600 text-white font-bold py-3 px-6 rounded-xl">Volver al Inicio</button>
             </div>
         );
         return this.props.children;
@@ -58,16 +58,9 @@
       { auth: { persistSession: true, storage: window.localStorage, autoRefreshToken: true } }
     );
 
-    const MENU_EMERGENCIA = [
-      { id: '11111111-1111-1111-1111-111111111111', nombre: 'Bokata Clásico', precio: 5.50, imagen_url: 'https://images.unsplash.com/photo-1619881589316-56c7f9e6b587?w=500', categoria: 'Bocadillos' },
-      { id: '22222222-2222-2222-2222-222222222222', nombre: 'Burger Doble', precio: 8.90, imagen_url: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=500', categoria: 'Hamburguesas' }
-    ];
-
     function MainApp() {
-      const [vistaActual, setVistaActual] = useState('mesa');
       const [mesaParam, setMesaParam] = useState(null);
       const [user, setUser] = useState(null);
-      const [userProfile, setUserProfile] = useState(null);
       const [authLoading, setAuthLoading] = useState(true);
       
       const [productos, setProductos] = useState([]);
@@ -75,7 +68,6 @@
       const [mesaBloqueada, setMesaBloqueada] = useState(false);
       const [hostName, setHostName] = useState('');
       
-      const [carrito, setCarrito] = useState([]); 
       const [carritosAmigos, setCarritosAmigos] = useState({}); 
       const [rondasBorrador, setRondasBorrador] = useState([]); 
       const [rondasEnviadas, setRondasEnviadas] = useState([]); 
@@ -84,6 +76,7 @@
       const [ultimaActividad, setUltimaActividad] = useState(Date.now());
       const [productoPendiente, setProductoPendiente] = useState(null);
       
+      // Modales
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('login'); 
       const [email, setEmail] = useState('');
@@ -101,6 +94,7 @@
       const channelRef = useRef(null);
       const ticketProcesadoRef = useRef(false);
 
+      // INICIALIZACIÓN
       useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const mesa = urlParams.get('mesa');
@@ -115,12 +109,13 @@
 
         const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
           if(session?.user) procesarUsuario(session.user);
-          else { setUser(null); setUserProfile(null); setUltimoPedido(null); setAuthLoading(false); }
+          else { setUser(null); setUltimoPedido(null); setAuthLoading(false); }
         });
 
         return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
       }, []);
 
+      // VIGILANTE MESA GLOBAL
       useEffect(() => {
         if (!mesaParam || authLoading) return;
         verificarSesionMesa();
@@ -135,6 +130,7 @@
         return () => supabase.removeChannel(globalChannel);
       }, [mesaParam, user, authLoading, sesionActiva]);
 
+      // VIGILANTE CARRITOS Y COBROS
       useEffect(() => {
         if (sesionActiva) {
           cargarRondasMesa(sesionActiva.id);
@@ -158,6 +154,7 @@
                cargarRondasMesa(sesionActiva.id);
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sesiones_mesa', filter: `id=eq.${sesionActiva.id}` }, (payload) => {
+               // 🔥 SI EL CAMARERO COBRA, ENSEÑAMOS EL TICKET
                if (payload.new.estado === 'pagada') {
                   cargarTicketFinal(sesionActiva.id);
                }
@@ -168,6 +165,7 @@
         }
       }, [sesionActiva, user]);
 
+      // EFECTO MEMORIA TRAS REGISTRO
       useEffect(() => {
          if (user && productoPendiente && !authLoading) {
             if (!sesionActiva) {
@@ -179,6 +177,7 @@
          }
       }, [user, productoPendiente, authLoading, sesionActiva]);
 
+      // RELOJ INACTIVIDAD
       useEffect(() => {
         if (!sesionActiva || sesionActiva.estado === 'pagada') return;
         const interval = setInterval(() => {
@@ -190,33 +189,21 @@
         return () => clearInterval(interval);
       }, [sesionActiva, ultimaActividad, showTimeoutModal]);
 
-      // 🧠 LÓGICA DE USUARIO MULTI-RESTAURANTE
+      // --- FUNCIONES ---
       const procesarUsuario = async (authUser) => {
         setUser(authUser);
         try {
-          // Aseguramos que existe el usuario
           let { data: userDb } = await supabase.from('usuarios').select('id').eq('id', authUser.id).maybeSingle();
-          if (!userDb) {
-            await supabase.from('usuarios').insert([{ id: authUser.id, email: authUser.email }]);
-          }
-          
-          // Extraemos la billetera ESPECÍFICA de este restaurante
-          let { data: ptsData } = await supabase.from('puntos_fidelizacion').select('puntos').eq('usuario_id', authUser.id).eq('restaurante_id', RESTAURANTE_ID).maybeSingle();
-          
-          setUserProfile({ email: authUser.email, puntos: ptsData?.puntos || 0 });
+          if (!userDb) await supabase.from('usuarios').insert([{ id: authUser.id, email: authUser.email }]);
           buscarUltimoPedido(authUser.id);
-        } catch(e) { setUserProfile({ puntos: 0, email: authUser.email }); }
+        } catch(e) { console.warn("Error leyendo usuario", e); }
         setAuthLoading(false);
       };
 
       const cargarMenu = async () => {
-        const { data, error } = await supabase.from('productos')
-          .select('*')
-          .eq('restaurante_id', RESTAURANTE_ID)
-          .eq('activo', true);
-          
-        if (data && data.length > 0) setProductos(data);
-        else setProductos(MENU_EMERGENCIA); // Si no ha creado platos, pone los de prueba
+        // 🔥 Carga los productos reales de TU restaurante
+        const { data, error } = await supabase.from('productos').select('*').eq('restaurante_id', RESTAURANTE_ID).eq('activo', true);
+        if (data) setProductos(data);
       };
 
       const buscarUltimoPedido = async (userId) => {
@@ -229,29 +216,33 @@
 
       const verificarSesionMesa = async () => {
         const { data } = await supabase.from('sesiones_mesa')
-          .select('*, host:usuarios(nombre, email)')
-          .eq('num_mesa', mesaParam)
-          .eq('restaurante_id', RESTAURANTE_ID) // FILTRO MARCA BLANCA
-          .neq('estado', 'pagada').maybeSingle();
-          
+          .select('*, host:usuarios(nombre, email)').eq('num_mesa', mesaParam).eq('restaurante_id', RESTAURANTE_ID).neq('estado', 'pagada').maybeSingle();
         if (data) {
           if (!user || data.host_id !== user?.id) {
             if (data.compartida === false) {
-              setMesaBloqueada(true); setShowJoinPrompt(false);
+              setMesaBloqueada(true); 
+              setShowJoinPrompt(false);
             } else {
               const yaAcepto = window.sessionStorage.getItem(`unido_mesa_${mesaParam}`);
               if (!yaAcepto) {
                 setHostName(data.host?.nombre || data.host?.email?.split('@')[0] || 'Alguien');
-                setShowJoinPrompt(true); setMesaBloqueada(false);
+                setShowJoinPrompt(true); 
+                setMesaBloqueada(false);
               } else {
-                setSesionActiva(data); setShowJoinPrompt(false); setMesaBloqueada(false);
+                setSesionActiva(data);
+                setShowJoinPrompt(false);
+                setMesaBloqueada(false);
               }
             }
           } else {
-            setMesaBloqueada(false); setShowJoinPrompt(false); setSesionActiva(data);
+            setMesaBloqueada(false);
+            setShowJoinPrompt(false);
+            setSesionActiva(data);
           }
         } else {
-          setSesionActiva(null); setMesaBloqueada(false); setShowJoinPrompt(false);
+          setSesionActiva(null);
+          setMesaBloqueada(false);
+          setShowJoinPrompt(false);
         }
       };
 
@@ -262,7 +253,7 @@
       };
 
       const cargarRondasMesa = async (idSesion) => {
-        const { data } = await supabase.from('pedidos_rondas')
+        const { data, error } = await supabase.from('pedidos_rondas')
           .select('*, items:items_pedido(id, cantidad, precio_unitario, producto_id, producto:productos(nombre, precio)), usuario:usuarios(nombre, email)')
           .eq('sesion_id', idSesion).order('fecha', { ascending: true });
           
@@ -281,6 +272,7 @@
         else setShowAuthModal(false); 
       };
 
+      // 🍔 AÑADIR A DB
       const intentarAñadirAlCarrito = (producto) => {
         if (!user) { 
            setProductoPendiente(producto);
@@ -312,7 +304,7 @@
             }]);
             
             mostrarToast(`Añadido: ${producto.nombre} 🛒`);
-         } catch(e) { console.error(e); }
+         } catch(e) { console.error("Error al añadir:", e); }
       };
 
       const eliminarItemBorrador = async (itemId) => {
@@ -322,9 +314,9 @@
       const procesarCrearMesaYPedir = async (esCompartida) => {
         setShowModoMesa(false);
         try {
-           const { data } = await supabase.from('sesiones_mesa')
-              .insert([{ restaurante_id: RESTAURANTE_ID, num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida }])
-              .select().single();
+           const { data } = await supabase.from('sesiones_mesa').insert([{ 
+              restaurante_id: RESTAURANTE_ID, num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida 
+           }]).select().single();
            setSesionActiva(data);
         } catch(e) { console.error(e); }
       };
@@ -336,15 +328,13 @@
 
          try {
             await supabase.from('pedidos_rondas').update({estado: 'listo'}).eq('id', miRonda.id);
-            const { data: pendientes } = await supabase.from('pedidos_rondas')
-               .select('id').eq('sesion_id', sesionActiva.id).eq('estado', 'pendiente');
+            const { data: pendientes } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', sesionActiva.id).eq('estado', 'pendiente');
                
             if (pendientes && pendientes.length > 0) {
                mostrarToast("¡Estás listo! Esperando a tus amigos... ⏳");
             } else {
-               await supabase.from('pedidos_rondas').update({estado: 'enviado', fecha: new Date().toISOString()})
-                  .eq('sesion_id', sesionActiva.id).eq('estado', 'listo');
-               mostrarToast("¡Ronda grupal enviada a cocina! 🚀");
+               await supabase.from('pedidos_rondas').update({estado: 'enviado', fecha: new Date().toISOString()}).eq('sesion_id', sesionActiva.id).eq('estado', 'listo');
+               mostrarToast("¡Ronda grupal a cocina! 🚀");
             }
          } catch(e) { console.error(e); }
       };
@@ -355,13 +345,13 @@
         mostrarToast("El camarero trae la cuenta. ¡Avisado! 💸");
       };
 
-      // 🧾 TICKET VISUAL - El Trigger de Supabase ya ha sumado los puntos. Solo recargamos UI.
+      // 🧾 CARGAR TICKET FINAL (Solo lee datos visuales, los puntos reales los puso el Trigger SQL)
       const cargarTicketFinal = async (idSesion) => {
          if (ticketProcesadoRef.current) return;
          ticketProcesadoRef.current = true;
 
          try {
-            if (!user) return salirDeMesa();
+            if (!user) return finalizarYSalir();
 
             const { data: misRondas } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', idSesion).eq('usuario_id', user.id).in('estado', ['enviado', 'preparando', 'servido']);
             let totalGastado = 0;
@@ -373,40 +363,36 @@
                if (items) {
                   misItems = items;
                   items.forEach(i => {
-                     const precioReal = parseFloat(i.precio_unitario || 0);
-                     const cantidadReal = parseInt(i.cantidad || 1);
-                     totalGastado += (precioReal * cantidadReal);
+                     totalGastado += (parseFloat(i.precio_unitario || 0) * parseInt(i.cantidad || 1));
                   });
                }
             }
             
+            // Esto es solo para que el cliente lo vea en el ticket, los de verdad ya están en su cuenta.
             const puntosGanadosVisuales = Math.floor(totalGastado * 100);
-            
-            // Refrescamos puntos desde DB (el Robot ya los inyectó)
-            if (user) {
-               const { data: ptsData } = await supabase.from('puntos_fidelizacion').select('puntos').eq('usuario_id', user.id).eq('restaurante_id', RESTAURANTE_ID).maybeSingle();
-               setUserProfile(prev => ({ ...prev, puntos: ptsData?.puntos || 0 }));
-            }
 
             setDatosTicket({ subtotal: totalGastado, puntosGanados: puntosGanadosVisuales, items: misItems });
             setShowTicketModal(true);
          } catch (e) {
-            console.error("Fallo ticket:", e);
             setShowReviewModal(true); 
          }
       };
 
-      const salirDeMesa = () => {
+      // 🔥 REDIRECCIÓN INQUEBRANTABLE AL PERFIL AL TERMINAR
+      const finalizarYSalir = () => {
          window.location.href = 'perfil.html'; 
       };
 
       const formatMoney = (num) => Number(num).toFixed(2);
       const formatDate = (dateStr) => {
         const d = new Date(dateStr);
-        return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} a las ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+        return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
       };
-
       const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
+
+      // ==========================================
+      // UI Y VISTAS
+      // ==========================================
 
       if (authLoading) return (
         <div className="h-screen flex items-center justify-center bg-yellow-50 flex-col">
@@ -431,14 +417,14 @@
           <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl w-full">
             <h1 className="text-5xl font-black text-red-600 mb-2 tracking-tighter">BOKALIA</h1>
             <p className="text-gray-500 mb-8 font-bold text-lg">¿En qué mesa te sientas?</p>
-            <input type="number" id="inputMesa" className="text-center text-6xl font-black w-full p-4 rounded-[2rem] bg-gray-50 border-4 border-gray-200 mb-6 outline-none focus:border-red-500" placeholder="0" />
+            <input type="number" id="inputMesa" className="text-center text-6xl font-black w-full p-4 rounded-[2rem] bg-gray-50 border-4 border-gray-200 mb-6 outline-none focus:border-red-500 transition-colors" placeholder="0" />
             <button onClick={() => {
                 const num = document.getElementById('inputMesa').value;
                 if(num) window.location.search = `?mesa=${num}`;
               }} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-[2rem] text-2xl shadow-xl">
               Empezar
             </button>
-            <button onClick={() => window.location.href = 'perfil.html'} className="mt-8 text-gray-400 font-bold hover:text-gray-600">Ir a mi Perfil Bokalia</button>
+            <button onClick={() => window.location.href='perfil.html'} className="mt-8 text-gray-500 font-bold">Ir a mi Perfil</button>
           </div>
         </div>
       );
@@ -535,7 +521,7 @@
             )}
 
             <h2 className="text-2xl font-black text-gray-800 mb-4 ml-1 tracking-tight">La Carta</h2>
-            {productos.length === 0 && <p className="text-gray-500 text-sm italic ml-1">No hay productos disponibles.</p>}
+            {productos.length === 0 && <p className="text-gray-500 text-sm font-bold ml-2">Menú no disponible.</p>}
             
             <div className="grid grid-cols-2 gap-4 mb-8">
               {productos.map(p => (
@@ -593,7 +579,6 @@
             )}
           </div>
 
-          {/* BOTÓN FLOTANTE "MANDAR A COCINA" */}
           {totalItemsMesaPendiente > 0 && !mesaBloqueada && (
             <div className="fixed bottom-0 left-0 w-full bg-white p-5 shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.15)] z-20 animate-slide-up rounded-t-[2.5rem]">
               <div className="flex justify-between items-center max-w-md mx-auto">
@@ -611,8 +596,9 @@
             </div>
           )}
 
+          {/* MODALES ABSOLUTES */}
           {showAuthModal && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
               <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
                 <button onClick={() => { setShowAuthModal(false); setProductoPendiente(null); }} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
                 <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">{authMode === 'login' ? 'Hola' : 'Únete'}</h3>
@@ -628,12 +614,12 @@
           )}
 
           {showModoMesa && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up text-center">
                 <button onClick={() => { setShowModoMesa(false); setProductoPendiente(null); }} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
                 <div className="text-6xl mb-6 mt-4">🍕</div>
                 <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Cómo vais a pedir?</h3>
-                <p className="text-gray-500 text-sm font-medium mb-10">Elige la configuración para tu mesa.</p>
+                <p className="text-gray-500 text-sm font-medium mb-10">Elige la configuración para tu mesa. Se aplica al pedir la cuenta.</p>
                 <div className="flex flex-col gap-4">
                   <button onClick={() => procesarCrearMesaYPedir(true)} className="w-full bg-yellow-400 text-yellow-900 font-black py-6 px-4 rounded-3xl shadow-xl shadow-yellow-400/30 active:scale-95 transition-transform flex flex-col items-center">
                     <span className="text-xl">Con Amigos</span>
@@ -649,7 +635,7 @@
           )}
 
           {showTicketModal && (
-            <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[120] flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
                 <div className="text-6xl mb-4">🧾</div>
                 <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¡Cuenta Pagada!</h3>
@@ -692,7 +678,7 @@
                 <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Sigues ahí?</h3>
                 <p className="text-sm text-gray-500 mb-8 font-medium">Llevas un tiempo sin pedir nada en la mesa.</p>
                 <button onClick={() => { setUltimaActividad(Date.now()); setShowTimeoutModal(false); }} className="w-full bg-green-500 text-white font-black py-5 rounded-2xl shadow-xl mb-4 text-xl">Sí, sigo aquí</button>
-                <button onClick={salirDeMesa} className="w-full bg-red-100 text-red-600 font-black py-5 rounded-2xl text-xl">No, ya me he ido</button>
+                <button onClick={finalizarYSalir} className="w-full bg-red-100 text-red-600 font-black py-5 rounded-2xl text-xl">No, ya me he ido</button>
               </div>
             </div>
           )}
@@ -705,10 +691,10 @@
                 <p className="text-sm text-gray-500 mb-8 font-medium">Toca las estrellas para valorarnos.</p>
                 <div className="flex justify-center gap-3 mb-10">
                   {[1,2,3,4,5].map(star => (
-                    <button key={star} onClick={salirDeMesa} className="text-5xl text-yellow-400 active:scale-75 transition-transform">★</button>
+                    <button key={star} onClick={() => { window.open('https://maps.google.com', '_blank'); finalizarYSalir(); }} className="text-5xl text-yellow-400 active:scale-75 transition-transform">★</button>
                   ))}
                 </div>
-                <button onClick={salirDeMesa} className="text-sm font-bold text-gray-400 uppercase tracking-widest">Saltar y Salir</button>
+                <button onClick={finalizarYSalir} className="text-sm font-bold text-gray-400 uppercase tracking-widest">Saltar y Salir</button>
               </div>
             </div>
           )}
