@@ -61,8 +61,7 @@
     ];
 
     function MainApp() {
-      // ESTADOS VISTAS Y DATOS
-      const [vistaActual, setVistaActual] = useState('mesa'); // mesa | reservas | historial
+      const [vistaActual, setVistaActual] = useState('mesa');
       const [mesaParam, setMesaParam] = useState(null);
       const [user, setUser] = useState(null);
       const [userProfile, setUserProfile] = useState(null);
@@ -79,7 +78,6 @@
       const [ultimoPedido, setUltimoPedido] = useState(null);
       const [ultimaActividad, setUltimaActividad] = useState(Date.now());
       
-      // ESTADOS MODALES
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('login'); 
       const [email, setEmail] = useState('');
@@ -167,9 +165,10 @@
         setAuthLoading(false);
       };
 
+      // 🍏 GESTIÓN DE NOTIFICACIONES INTELIGENTE PARA iPHONE
       const pedirNotificaciones = async () => {
         if (!('Notification' in window)) {
-          alert("Tu navegador o móvil no soporta notificaciones nativas.");
+          alert("🍏 APPLE LO BLOQUEA: Para usar notificaciones en iPhone, pulsa el botón 'Compartir' (el cuadrado con la flecha arriba) y dale a 'Añadir a la pantalla de inicio'. Entra desde ahí y funcionará.");
           return;
         }
         try {
@@ -180,7 +179,7 @@
             await supabase.from('usuarios').update({ acepta_notificaciones: true }).eq('id', user.id);
             mostrarToast("¡Avisos activados! 🔔");
           } else if (permission === 'denied') {
-            alert("Has bloqueado las notificaciones. Para activarlas, ve a los Ajustes de tu móvil > Safari/Chrome > Notificaciones.");
+            alert("Has bloqueado las notificaciones. Para activarlas, ve a los Ajustes de tu móvil > Notificaciones.");
           }
         } catch (error) {
           alert("Añade esta web a tu pantalla de inicio como una App para poder recibir notificaciones.");
@@ -195,22 +194,16 @@
 
       const cargarHistorial = async () => {
         if (!user) return;
-        const { data } = await supabase
-          .from('pedidos_rondas')
+        const { data } = await supabase.from('pedidos_rondas')
           .select('id, fecha, items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
-          .eq('usuario_id', user.id)
-          .eq('oculto_usuario', false)
-          .order('fecha', { ascending: false });
+          .eq('usuario_id', user.id).eq('oculto_usuario', false).order('fecha', { ascending: false });
         if (data) setHistorial(data);
       };
 
       const borrarHistorial = async () => {
         if (!user || historial.length === 0) return;
         if (window.confirm("¿Seguro que quieres borrar tu historial visual?")) {
-           const { error } = await supabase
-             .from('pedidos_rondas')
-             .update({ oculto_usuario: true })
-             .eq('usuario_id', user.id);
+           const { error } = await supabase.from('pedidos_rondas').update({ oculto_usuario: true }).eq('usuario_id', user.id);
            if (!error) {
              setHistorial([]);
              mostrarToast("Historial limpiado 🧹");
@@ -268,10 +261,25 @@
         
         if (sesionActiva) {
            supabase.channel(`mesa_sync_${sesionActiva.id}`).send({
-              type: 'broadcast',
-              event: 'add_to_cart',
+              type: 'broadcast', event: 'add_to_cart',
               payload: { userId: user.id, userName: userProfile?.nombre || userProfile?.email?.split('@')[0] || 'Un amigo', productName: producto.nombre }
            });
+        }
+      };
+
+      // 🍔 AQUÍ EVALUAMOS SI PREGUNTA LO DE LA MESA (SOLO CUANDO NO HAY SESIÓN)
+      const intentarEnviarPedido = () => {
+        if (!user) {
+           setAuthMode('register'); 
+           setShowAuthModal(true);
+           return;
+        }
+        
+        // Si NO hay sesión activa, preguntamos. Si YA hay, pedimos directo.
+        if (!sesionActiva) {
+           setShowModoMesa(true);
+        } else {
+           procesarEnvio(sesionActiva.compartida);
         }
       };
 
@@ -310,7 +318,6 @@
         mostrarToast("Cuenta solicitada. ¡Tus puntos se sumarán al cerrar!");
         setTimeout(async () => {
           await supabase.from('sesiones_mesa').update({ estado: 'pagada' }).eq('id', sesionActiva.id);
-          // Calculo Puntos
           const { data: rondasUsuario } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', sesionActiva.id).eq('usuario_id', user.id);
           if (rondasUsuario && rondasUsuario.length > 0) {
              const rondasIds = rondasUsuario.map(r => r.id);
@@ -505,6 +512,7 @@
           {/* VISTA MESA */}
           {vistaActual === 'mesa' && (
             <div className="animate-fade-in flex-grow relative">
+              
               <div className="m-4">
                 {!user ? (
                   <div className="relative overflow-hidden rounded-[2rem] p-6 shadow-lg bg-gradient-to-br from-gray-700 to-gray-900 text-white cursor-pointer" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
@@ -574,6 +582,7 @@
                   ))}
                 </div>
 
+                {/* CESTA DE LA MESA */}
                 {rondas.length > 0 && (
                   <div className="mb-8">
                     <div className="flex justify-between items-center mb-4 ml-1">
@@ -608,7 +617,7 @@
             </div>
           )}
 
-          {/* CARRITO */}
+          {/* CARRITO FLOTANTE */}
           {carrito.length > 0 && vistaActual === 'mesa' && !mesaBloqueada && (
             <div className="fixed bottom-0 left-0 w-full bg-white p-5 shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.15)] z-20 animate-slide-up rounded-t-[2.5rem]">
               <div className="flex justify-between items-center max-w-md mx-auto">
@@ -616,12 +625,8 @@
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tu pedido</p>
                   <p className="text-3xl font-black text-gray-800 tracking-tighter">{carrito.length} <span className="text-base font-bold text-gray-500">ítems</span></p>
                 </div>
-                <button onClick={() => {
-                   if (!user) { setAuthMode('register'); setShowAuthModal(true); }
-                   else if (!sesionActiva) setShowModoMesa(true);
-                   else procesarEnvio(sesionActiva.compartida);
-                }} className="bg-green-500 text-white font-black py-4 px-6 rounded-2xl shadow-[0_8px_20px_rgba(34,197,94,0.4)] text-lg flex items-center gap-2 active:scale-95 transition-transform">
-                  Mandar a cocina
+                <button onClick={intentarEnviarPedido} className="bg-green-500 text-white font-black py-4 px-6 rounded-2xl shadow-[0_8px_20px_rgba(34,197,94,0.4)] text-lg flex items-center gap-2 active:scale-95 transition-transform">
+                  Enviar a cocina
                 </button>
               </div>
             </div>
