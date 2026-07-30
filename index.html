@@ -23,7 +23,7 @@
 <body class="flex justify-center min-h-screen">
   
   <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container">
-    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background-color:#fefce8; color:#dc2626; font-family:sans-serif;">
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background-color:#fefce8; color:#dc2626;">
       <h1 style="font-size:3rem; font-weight:900; margin:0; letter-spacing:-2px;">BOKALIA</h1>
       <p style="font-weight:bold; margin-top:10px; opacity:0.7;">Conectando...</p>
     </div>
@@ -31,7 +31,7 @@
 
   <script type="text/babel">
     const { useState, useEffect } = React;
-    const TIEMPO_LIMITE_MINUTOS = 120; // 2 Horas
+    const TIEMPO_LIMITE_MINUTOS = 120; 
 
     class ErrorBoundary extends React.Component {
       constructor(props) { super(props); this.state = { hasError: false, error: null }; }
@@ -72,9 +72,10 @@
       const [mesaBloqueada, setMesaBloqueada] = useState(false);
       const [hostName, setHostName] = useState('');
       
-      const [rondas, setRondas] = useState([]);
+      const [rondasEnviadas, setRondasEnviadas] = useState([]);
+      const [rondasPendientes, setRondasPendientes] = useState([]); // El Carrito Grupal en Tiempo Real
       const [historial, setHistorial] = useState([]);
-      const [carrito, setCarrito] = useState([]);
+      
       const [ultimoPedido, setUltimoPedido] = useState(null);
       const [ultimaActividad, setUltimaActividad] = useState(Date.now());
       
@@ -84,13 +85,12 @@
       const [password, setPassword] = useState('');
       
       const [showModoMesa, setShowModoMesa] = useState(false);
+      const [productoPendiente, setProductoPendiente] = useState(null); // Producto en memoria si crea la mesa
       const [showJoinPrompt, setShowJoinPrompt] = useState(false);
       const [showReviewModal, setShowReviewModal] = useState(false);
-      const [showTimeoutModal, setShowTimeoutModal] = useState(false);
       
       const [notifPerm, setNotifPerm] = useState('default');
       const [toastMsg, setToastMsg] = useState('');
-      const [broadcastMsg, setBroadcastMsg] = useState('');
 
       useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -127,17 +127,18 @@
         return () => supabase.removeChannel(globalChannel);
       }, [mesaParam, user, authLoading]);
 
+      // VIGILANTE EN TIEMPO REAL DEL CARRITO GRUPAL (ITEMS PEDIDO)
       useEffect(() => {
         if (sesionActiva) {
           cargarRondasMesa(sesionActiva.id);
-          const channel = supabase.channel(`mesa_sync_${sesionActiva.id}`)
-            .on('broadcast', { event: 'add_to_cart' }, (payload) => {
-               if (user && payload.payload.userId === user.id) return; 
-               mostrarBroadcast(`👀 ${payload.payload.userName} va a pedir: ${payload.payload.productName}`);
+          
+          const channel = supabase.channel(`mesa_rondas_${sesionActiva.id}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'items_pedido' }, () => {
+              cargarRondasMesa(sesionActiva.id);
+              setUltimaActividad(Date.now());
             })
             .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos_rondas', filter: `sesion_id=eq.${sesionActiva.id}` }, () => {
               cargarRondasMesa(sesionActiva.id);
-              setUltimaActividad(Date.now());
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sesiones_mesa', filter: `id=eq.${sesionActiva.id}` }, (payload) => {
               if (payload.new.estado === 'pagada') setTimeout(() => setShowReviewModal(true), 2000);
@@ -156,31 +157,25 @@
           let { data } = await supabase.from('usuarios').select('*').eq('id', authUser.id).single();
           if (!data) {
             const { data: newUser } = await supabase.from('usuarios').insert([{ id: authUser.id, email: authUser.email, puntos: 50 }]).select().single();
-            data = newUser || { puntos: 50, email: authUser.email, acepta_notificaciones: false }; 
+            data = newUser || { puntos: 50, email: authUser.email }; 
           }
           setUserProfile(data);
           buscarUltimoPedido(authUser.id);
           cargarHistorial();
-        } catch(e) { setUserProfile({ puntos: 0, email: authUser.email, acepta_notificaciones: false }); }
+        } catch(e) { setUserProfile({ puntos: 0, email: authUser.email }); }
         setAuthLoading(false);
       };
 
-      // 🍏 GESTIÓN DE NOTIFICACIONES INTELIGENTE PARA iPHONE
       const pedirNotificaciones = async () => {
         if (!('Notification' in window)) {
-          alert("🍏 APPLE LO BLOQUEA: Para usar notificaciones en iPhone, pulsa el botón 'Compartir' (el cuadrado con la flecha arriba) y dale a 'Añadir a la pantalla de inicio'. Entra desde ahí y funcionará.");
+          alert("🍏 Si estás en iPhone: Para usar notificaciones, pulsa 'Compartir' (el cuadrado con la flecha) y dale a 'Añadir a la pantalla de inicio'.");
           return;
         }
         try {
           const permission = await Notification.requestPermission();
           setNotifPerm(permission);
-          
-          if (permission === 'granted' && user) {
-            await supabase.from('usuarios').update({ acepta_notificaciones: true }).eq('id', user.id);
-            mostrarToast("¡Avisos activados! 🔔");
-          } else if (permission === 'denied') {
-            alert("Has bloqueado las notificaciones. Para activarlas, ve a los Ajustes de tu móvil > Notificaciones.");
-          }
+          if (permission === 'granted' && user) mostrarToast("¡Avisos activados! 🔔");
+          else if (permission === 'denied') alert("Bloqueaste las notificaciones. Actívalas en los Ajustes de tu móvil.");
         } catch (error) {
           alert("Añade esta web a tu pantalla de inicio como una App para poder recibir notificaciones.");
         }
@@ -196,23 +191,20 @@
         if (!user) return;
         const { data } = await supabase.from('pedidos_rondas')
           .select('id, fecha, items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
-          .eq('usuario_id', user.id).eq('oculto_usuario', false).order('fecha', { ascending: false });
+          .eq('usuario_id', user.id).eq('oculto_usuario', false).neq('estado', 'pendiente').order('fecha', { ascending: false });
         if (data) setHistorial(data);
       };
 
       const borrarHistorial = async () => {
         if (!user || historial.length === 0) return;
-        if (window.confirm("¿Seguro que quieres borrar tu historial visual?")) {
+        if (window.confirm("¿Limpiar todo tu historial visual?")) {
            const { error } = await supabase.from('pedidos_rondas').update({ oculto_usuario: true }).eq('usuario_id', user.id);
-           if (!error) {
-             setHistorial([]);
-             mostrarToast("Historial limpiado 🧹");
-           }
+           if (!error) { setHistorial([]); mostrarToast("Historial limpiado 🧹"); }
         }
       };
 
       const buscarUltimoPedido = async (userId) => {
-        const { data: ultimas } = await supabase.from('pedidos_rondas').select('id').eq('usuario_id', userId).order('fecha', { ascending: false }).limit(1);
+        const { data: ultimas } = await supabase.from('pedidos_rondas').select('id').eq('usuario_id', userId).neq('estado', 'pendiente').order('fecha', { ascending: false }).limit(1);
         if (ultimas && ultimas.length > 0) {
           const { data: items } = await supabase.from('items_pedido').select('producto_id, producto:productos(*)').eq('ronda_id', ultimas[0].id).limit(1);
           if (items && items.length > 0 && items[0].producto) setUltimoPedido(items[0].producto);
@@ -222,20 +214,29 @@
       const verificarSesionMesa = async () => {
         const { data } = await supabase.from('sesiones_mesa').select('*, host:usuarios(nombre, email)').eq('num_mesa', mesaParam).neq('estado', 'pagada').maybeSingle();
         if (data) {
+          // Si NO soy el Host de la mesa
           if (!user || data.host_id !== user?.id) {
             if (data.compartida === false) {
               setMesaBloqueada(true); 
               setShowJoinPrompt(false);
             } else {
-              setHostName(data.host?.nombre || data.host?.email?.split('@')[0] || 'Alguien');
-              setShowJoinPrompt(true); 
-              setMesaBloqueada(false);
+              // Comprobamos en el navegador si el usuario ya aceptó unirse a esta mesa concreta
+              const yaAcepto = window.sessionStorage.getItem(`unido_mesa_${mesaParam}`);
+              if (!yaAcepto) {
+                setHostName(data.host?.nombre || data.host?.email?.split('@')[0] || 'Alguien');
+                setShowJoinPrompt(true); 
+                setMesaBloqueada(false);
+              } else {
+                setSesionActiva(data);
+                setShowJoinPrompt(false);
+              }
             }
           } else {
+            // Soy el Host
             setMesaBloqueada(false);
             setShowJoinPrompt(false);
+            setSesionActiva(data);
           }
-          setSesionActiva(data);
         } else {
           setSesionActiva(null);
           setMesaBloqueada(false);
@@ -243,9 +244,21 @@
         }
       };
 
+      const aceptarUnirse = () => {
+         window.sessionStorage.setItem(`unido_mesa_${mesaParam}`, 'true');
+         setShowJoinPrompt(false);
+         verificarSesionMesa();
+      };
+
       const cargarRondasMesa = async (idSesion) => {
-        const { data } = await supabase.from('pedidos_rondas').select('*, items:items_pedido(id, cantidad, precio_unitario, producto_id, producto:productos(nombre, precio))').eq('sesion_id', idSesion);
-        if (data) setRondas(data);
+        const { data } = await supabase.from('pedidos_rondas')
+          .select('*, items:items_pedido(id, cantidad, precio_unitario, producto_id, producto:productos(nombre, precio)), usuario:usuarios(nombre, email)')
+          .eq('sesion_id', idSesion).order('fecha', { ascending: true });
+          
+        if (data) {
+           setRondasPendientes(data.filter(r => r.estado === 'pendiente' && r.items.length > 0));
+           setRondasEnviadas(data.filter(r => r.estado !== 'pendiente' && r.items.length > 0));
+        }
       };
 
       const handleAuth = async () => {
@@ -255,61 +268,63 @@
         else setShowAuthModal(false);
       };
 
-      const añadirAlCarrito = (producto) => {
+      // AÑADIR A LA BASE DE DATOS DIRECTAMENTE (CARRITO GRUPAL)
+      const añadirAlCarrito = async (producto) => {
         if (!user) { setAuthMode('register'); return setShowAuthModal(true); }
-        setCarrito([...carrito, { ...producto, idUnico: Math.random() }]);
         
-        if (sesionActiva) {
-           supabase.channel(`mesa_sync_${sesionActiva.id}`).send({
-              type: 'broadcast', event: 'add_to_cart',
-              payload: { userId: user.id, userName: userProfile?.nombre || userProfile?.email?.split('@')[0] || 'Un amigo', productName: producto.nombre }
-           });
-        }
-      };
-
-      // 🍔 AQUÍ EVALUAMOS SI PREGUNTA LO DE LA MESA (SOLO CUANDO NO HAY SESIÓN)
-      const intentarEnviarPedido = () => {
-        if (!user) {
-           setAuthMode('register'); 
-           setShowAuthModal(true);
+        let idSesion = sesionActiva?.id;
+        if (!idSesion) {
+           setProductoPendiente(producto);
+           setShowModoMesa(true);
            return;
         }
-        
-        // Si NO hay sesión activa, preguntamos. Si YA hay, pedimos directo.
-        if (!sesionActiva) {
-           setShowModoMesa(true);
-        } else {
-           procesarEnvio(sesionActiva.compartida);
+        procesarAñadir(idSesion, producto);
+      };
+
+      const procesarAñadir = async (idSesion, producto) => {
+         // Buscamos si el usuario ya tiene un borrador (ronda pendiente)
+         let idRondaPendiente;
+         const { data: rondaExistente } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', idSesion).eq('usuario_id', user.id).eq('estado', 'pendiente').maybeSingle();
+         
+         if (!rondaExistente) {
+             const { data: nuevaRonda } = await supabase.from('pedidos_rondas').insert([{ sesion_id: idSesion, usuario_id: user.id, estado: 'pendiente' }]).select().single();
+             idRondaPendiente = nuevaRonda.id;
+         } else {
+             idRondaPendiente = rondaExistente.id;
+         }
+
+         // Añadimos el item
+         await supabase.from('items_pedido').insert([{
+             ronda_id: idRondaPendiente, producto_id: producto.id, cantidad: 1, precio_unitario: producto.precio
+         }]);
+         
+         mostrarToast(`Añadido: ${producto.nombre} 🛒`);
+      };
+
+      const eliminarItem = async (itemId) => {
+         await supabase.from('items_pedido').delete().eq('id', itemId);
+      };
+
+      const procesarCrearMesa = async (esCompartida) => {
+        setShowModoMesa(false);
+        const { data } = await supabase.from('sesiones_mesa').insert([{ num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida }]).select().single();
+        setSesionActiva(data);
+        if (productoPendiente) {
+           procesarAñadir(data.id, productoPendiente);
+           setProductoPendiente(null);
         }
       };
 
-      const procesarEnvio = async (esCompartida) => {
-        try {
-          setShowModoMesa(false);
-          let idDeSesion = sesionActiva?.id;
-
-          if (!idDeSesion) {
-            const { data } = await supabase.from('sesiones_mesa').insert([{ num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida }]).select().single();
-            idDeSesion = data.id;
-            setSesionActiva(data);
-          }
-
-          const { data: ronda } = await supabase.from('pedidos_rondas').insert([{ sesion_id: idDeSesion, usuario_id: user.id }]).select().single();
-
-          if (ronda) {
-            const conteo = {};
-            carrito.forEach(p => { conteo[p.id] = (conteo[p.id] || 0) + 1; });
-            const itemsInsert = Object.keys(conteo).map(id => ({
-              ronda_id: ronda.id, producto_id: id, cantidad: conteo[id], precio_unitario: carrito.find(p => p.id === id).precio
-            }));
-            await supabase.from('items_pedido').insert(itemsInsert);
-            
-            setCarrito([]);
+      const enviarTodoACocina = async () => {
+         if (!sesionActiva) return;
+         // Actualizamos todas las rondas pendientes de la mesa a 'enviado'
+         const { error } = await supabase.from('pedidos_rondas').update({ estado: 'enviado', fecha: new Date().toISOString() }).eq('sesion_id', sesionActiva.id).eq('estado', 'pendiente');
+         
+         if (!error) {
+            mostrarToast("¡Toda la ronda enviada a cocina! 🚀");
+            cargarRondasMesa(sesionActiva.id);
             setUltimaActividad(Date.now());
-            cargarRondasMesa(idDeSesion);
-            mostrarToast("¡Orden enviada a cocina! 🚀");
-          }
-        } catch (error) { console.error(error); }
+         }
       };
 
       const pedirCuenta = async () => {
@@ -318,7 +333,8 @@
         mostrarToast("Cuenta solicitada. ¡Tus puntos se sumarán al cerrar!");
         setTimeout(async () => {
           await supabase.from('sesiones_mesa').update({ estado: 'pagada' }).eq('id', sesionActiva.id);
-          const { data: rondasUsuario } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', sesionActiva.id).eq('usuario_id', user.id);
+          // Calculo Puntos solo de lo enviado
+          const { data: rondasUsuario } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', sesionActiva.id).eq('usuario_id', user.id).neq('estado', 'pendiente');
           if (rondasUsuario && rondasUsuario.length > 0) {
              const rondasIds = rondasUsuario.map(r => r.id);
              const { data: items } = await supabase.from('items_pedido').select('cantidad, precio_unitario').in('ronda_id', rondasIds);
@@ -339,8 +355,7 @@
         return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} a las ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
       };
 
-      const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
-      const mostrarBroadcast = (msg) => { setBroadcastMsg(msg); setTimeout(() => setBroadcastMsg(''), 5000); };
+      const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 2500); };
 
       // ==========================================
       // UI Y VISTAS
@@ -357,8 +372,8 @@
         return (
           <div className="min-h-screen bg-gray-900 flex flex-col justify-center items-center p-8 text-center text-white">
             <div className="text-8xl mb-8">🔒</div>
-            <h1 className="text-4xl font-black mb-4">Mesa Ocupada</h1>
-            <p className="text-gray-300 font-medium text-lg leading-relaxed mb-12">Alguien ya está pidiendo en esta mesa con modo <b className="text-yellow-400">Cuenta Única</b>.</p>
+            <h1 className="text-4xl font-black mb-4">Mesa Cerrada</h1>
+            <p className="text-gray-300 font-medium text-lg leading-relaxed mb-12">El host de esta mesa ha seleccionado <b className="text-yellow-400">Cuenta Única</b>. No se admiten más móviles conectados.</p>
             <button onClick={() => window.location.search=''} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-5 rounded-2xl shadow-xl text-xl">Cambiar de mesa</button>
           </div>
         );
@@ -380,6 +395,8 @@
         </div>
       );
 
+      const totalItemsPendientes = rondasPendientes.reduce((acc, ronda) => acc + ronda.items.length, 0);
+
       return (
         <div className="pb-36 bg-gray-50 min-h-screen relative flex flex-col">
           
@@ -391,22 +408,14 @@
             </div>
           )}
 
-          {broadcastMsg && (
-            <div className="fixed top-24 left-1/2 transform -translate-x-1/2 z-[60] animate-fade-in w-11/12 max-w-sm">
-              <div className="bg-white border-2 border-orange-400 text-orange-900 font-bold px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3">
-                <span className="animate-bounce">🛒</span>
-                <span className="text-sm leading-tight">{broadcastMsg}</span>
-              </div>
-            </div>
-          )}
-
+          {/* UNIRSE A MESA OBLIGATORIO */}
           {showJoinPrompt && (
-            <div className="fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in">
-              <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl">
+            <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
                 <div className="text-6xl mb-4">👋</div>
                 <h3 className="text-3xl font-black text-gray-800 mb-2">Mesa de {hostName}</h3>
                 <p className="text-gray-500 font-medium text-lg mb-8">Esta mesa ya está abierta. ¿Sois del mismo grupo?</p>
-                <button onClick={() => setShowJoinPrompt(false)} className="w-full bg-yellow-400 text-yellow-900 font-black py-5 rounded-2xl shadow-lg text-xl mb-4 active:scale-95 transition-transform">Sí, unirme a la mesa</button>
+                <button onClick={aceptarUnirse} className="w-full bg-yellow-400 text-yellow-900 font-black py-5 rounded-2xl shadow-lg text-xl mb-4 active:scale-95 transition-transform">Sí, unirme a la mesa</button>
                 <button onClick={() => window.location.search=''} className="w-full bg-gray-100 text-gray-600 font-black py-4 rounded-2xl">No, me he equivocado</button>
               </div>
             </div>
@@ -422,7 +431,6 @@
                  <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-black bg-yellow-400 text-red-900 px-5 py-2 rounded-xl shadow-sm">Entrar</button>
               )}
             </div>
-            {/* TABS HEADER */}
             <div className="flex gap-3 border-t border-red-500 pt-3 mt-3 overflow-x-auto">
               <button onClick={() => setVistaActual('mesa')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='mesa' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Mesa {mesaParam}</button>
               <button onClick={() => setVistaActual('historial')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='historial' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Historial</button>
@@ -430,7 +438,7 @@
             </div>
           </header>
 
-          {/* BANNERS */}
+          {/* BANNERS INFORMATIVOS */}
           {!user && (
              <div onClick={() => { setAuthMode('register'); setShowAuthModal(true); }} className="bg-gradient-to-r from-orange-500 to-red-500 text-white p-4 flex justify-between items-center cursor-pointer shadow-sm">
                 <div>
@@ -440,12 +448,11 @@
                 <button className="bg-white text-red-600 text-xs font-black px-4 py-2 rounded-xl shadow-sm">Regístrate</button>
              </div>
           )}
-          
           {user && notifPerm !== 'granted' && (
              <div className="bg-blue-600 text-white p-4 flex justify-between items-center shadow-sm">
                 <div>
                    <p className="text-sm font-black mb-1">🔔 ¡Ofertas exclusivas!</p>
-                   <p className="text-[10px] font-medium opacity-90 leading-tight">Activa los avisos en tu dispositivo.</p>
+                   <p className="text-[10px] font-medium opacity-90 leading-tight">Activa los avisos para enterarte de todo.</p>
                 </div>
                 <button onClick={pedirNotificaciones} className="bg-white text-blue-600 text-xs font-black px-4 py-2 rounded-xl shadow-sm ml-2">Activar</button>
              </div>
@@ -481,7 +488,7 @@
 
               {user && historial.length > 0 && (
                 <div className="space-y-4">
-                  {historial.map((h, i) => {
+                  {historial.map((h) => {
                      const total = h.items.reduce((acc, item) => acc + (item.cantidad * item.precio_unitario), 0);
                      return (
                         <div key={h.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
@@ -492,24 +499,20 @@
                           <ul className="text-sm text-gray-700 space-y-2">
                             {h.items.map((item, idx) => (
                               <li key={idx} className="flex gap-2 font-medium">
-                                 <span className="text-red-500 font-black">{item.cantidad}x</span>
-                                 {item.producto?.nombre}
+                                 <span className="text-red-500 font-black">{item.cantidad}x</span>{item.producto?.nombre}
                               </li>
                             ))}
                           </ul>
                         </div>
                      );
                   })}
-                  
-                  <button onClick={borrarHistorial} className="w-full mt-8 bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl active:bg-gray-200 transition-colors">
-                    Limpiar mi historial
-                  </button>
+                  <button onClick={borrarHistorial} className="w-full mt-8 bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl active:bg-gray-200 transition-colors">Limpiar mi historial</button>
                 </div>
               )}
             </div>
           )}
 
-          {/* VISTA MESA */}
+          {/* VISTA MESA (CARTA Y PEDIDOS) */}
           {vistaActual === 'mesa' && (
             <div className="animate-fade-in flex-grow relative">
               
@@ -553,6 +556,39 @@
               </div>
 
               <div className="p-4">
+                
+                {/* BORRADOR GRUPAL EN TIEMPO REAL */}
+                {rondasPendientes.length > 0 && (
+                  <div className="mb-10 bg-orange-50 p-5 rounded-[2rem] border-2 border-orange-200 shadow-md">
+                    <h2 className="text-xl font-black text-orange-900 mb-4 flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 bg-orange-500 rounded-full animate-ping"></span>
+                      Borrador de la Mesa
+                    </h2>
+                    
+                    {rondasPendientes.map(ronda => (
+                       <div key={ronda.id} className="mb-4 last:mb-0">
+                         <p className="text-xs font-bold text-orange-700 uppercase tracking-widest border-b border-orange-200 pb-1 mb-2">
+                            {ronda.usuario_id === user?.id ? 'Tú vas a pedir:' : `${ronda.usuario?.nombre || ronda.usuario?.email?.split('@')[0]} va a pedir:`}
+                         </p>
+                         <ul className="space-y-2">
+                            {ronda.items.map(item => (
+                               <li key={item.id} className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm">
+                                  <div className="flex gap-3 items-center text-sm font-bold text-gray-800">
+                                     <span className="bg-orange-100 text-orange-600 w-6 h-6 flex items-center justify-center rounded-md">{item.cantidad}x</span>
+                                     {item.producto?.nombre}
+                                  </div>
+                                  {ronda.usuario_id === user?.id && (
+                                     <button onClick={() => eliminarItem(item.id)} className="bg-red-100 text-red-600 p-2 rounded-lg hover:bg-red-200 active:scale-95 transition-all">🗑️</button>
+                                  )}
+                               </li>
+                            ))}
+                         </ul>
+                       </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* UPSELLING */}
                 {ultimoPedido && (
                   <div className="bg-gradient-to-r from-orange-500 to-red-500 p-1.5 rounded-[2rem] shadow-lg mb-8">
                     <div className="bg-white/10 backdrop-blur-sm rounded-[1.6rem] p-4 flex items-center justify-between border border-white/20">
@@ -582,30 +618,33 @@
                   ))}
                 </div>
 
-                {/* CESTA DE LA MESA */}
-                {rondas.length > 0 && (
+                {/* RONDAS YA ENVIADAS */}
+                {rondasEnviadas.length > 0 && (
                   <div className="mb-8">
                     <div className="flex justify-between items-center mb-4 ml-1">
                       <h2 className="text-xl font-black text-gray-800 flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]"></div>
-                        Mesa en directo
+                        <div className="w-2.5 h-2.5 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.8)]"></div>
+                        En preparación
                       </h2>
                       {sesionActiva.estado === 'activa' && (
                         <button onClick={pedirCuenta} className="bg-gray-900 text-white text-xs font-black px-5 py-3 rounded-2xl shadow-lg active:bg-black transition-colors">Pedir Cuenta</button>
                       )}
                     </div>
-                    {rondas.map((ronda, i) => (
+                    {rondasEnviadas.map((ronda, i) => (
                       <div key={ronda.id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-gray-100 mb-4">
                         <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-3">
                           <p className="font-black text-gray-400 text-sm uppercase tracking-widest">Ronda #{i+1}</p>
-                          <span className="text-[10px] font-black text-orange-600 bg-orange-100 px-3 py-1 rounded-full uppercase tracking-widest">{ronda.estado}</span>
+                          <span className="text-[10px] font-black text-green-700 bg-green-100 px-3 py-1 rounded-full uppercase tracking-widest">{ronda.estado}</span>
                         </div>
                         <ul className="text-sm text-gray-800 space-y-3">
                           {ronda.items?.map((item, idx) => (
                             <li key={idx} className="flex gap-3 font-bold items-center text-base">
-                               <span className="bg-gray-100 text-red-600 w-8 h-8 flex items-center justify-center rounded-xl">{item.cantidad}x</span>
+                               <span className="bg-gray-100 text-gray-600 w-8 h-8 flex items-center justify-center rounded-xl">{item.cantidad}x</span>
                                {item.producto?.nombre} 
-                               <span className="text-gray-400 text-xs ml-auto">{item.precio_unitario}€</span>
+                               <span className="text-gray-400 text-xs ml-auto text-right leading-tight">
+                                  {item.precio_unitario}€<br/>
+                                  <span className="text-[9px] uppercase tracking-wider">{ronda.usuario_id === user?.id ? 'Tú' : ronda.usuario?.nombre}</span>
+                               </span>
                             </li>
                           ))}
                         </ul>
@@ -617,15 +656,15 @@
             </div>
           )}
 
-          {/* CARRITO FLOTANTE */}
-          {carrito.length > 0 && vistaActual === 'mesa' && !mesaBloqueada && (
+          {/* BOTÓN FLOTANTE "MANDAR A COCINA" */}
+          {totalItemsPendientes > 0 && vistaActual === 'mesa' && !mesaBloqueada && (
             <div className="fixed bottom-0 left-0 w-full bg-white p-5 shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.15)] z-20 animate-slide-up rounded-t-[2.5rem]">
               <div className="flex justify-between items-center max-w-md mx-auto">
                 <div>
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Tu pedido</p>
-                  <p className="text-3xl font-black text-gray-800 tracking-tighter">{carrito.length} <span className="text-base font-bold text-gray-500">ítems</span></p>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Mesa pendiente</p>
+                  <p className="text-3xl font-black text-gray-800 tracking-tighter">{totalItemsPendientes} <span className="text-base font-bold text-gray-500">ítems</span></p>
                 </div>
-                <button onClick={intentarEnviarPedido} className="bg-green-500 text-white font-black py-4 px-6 rounded-2xl shadow-[0_8px_20px_rgba(34,197,94,0.4)] text-lg flex items-center gap-2 active:scale-95 transition-transform">
+                <button onClick={enviarTodoACocina} className="bg-green-500 text-white font-black py-4 px-6 rounded-2xl shadow-[0_8px_20px_rgba(34,197,94,0.4)] text-lg flex items-center gap-2 active:scale-95 transition-transform">
                   Enviar a cocina
                 </button>
               </div>
@@ -637,18 +676,14 @@
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
               <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
                 <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
-                
                 <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">{authMode === 'login' ? 'Hola' : 'Únete'}</h3>
                 <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta.' : 'Crea tu cuenta para ganar puntos.'}</p>
                 <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
                 <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
-                
                 <button onClick={handleAuth} className={`w-full text-white font-black py-5 rounded-2xl text-xl active:scale-95 transition-transform mb-4 shadow-lg ${authMode === 'login' ? 'bg-red-600 shadow-red-600/30' : 'bg-yellow-400 text-yellow-900 shadow-yellow-400/50'}`}>
                    {authMode === 'login' ? 'Entrar' : 'Registrarme'}
                 </button>
-                <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-gray-500 font-bold py-3">
-                   {authMode === 'login' ? 'No tengo cuenta, crear una' : 'Ya tengo cuenta, iniciar sesión'}
-                </button>
+                <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-gray-500 font-bold py-3">{authMode === 'login' ? 'No tengo cuenta, crear una' : 'Ya tengo cuenta, iniciar sesión'}</button>
               </div>
             </div>
           )}
@@ -661,15 +696,29 @@
                 <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Cómo vais a pedir?</h3>
                 <p className="text-gray-500 text-sm font-medium mb-10">Elige la configuración para esta mesa.</p>
                 <div className="flex flex-col gap-4">
-                  <button onClick={() => procesarEnvio(true)} className="w-full bg-yellow-400 text-yellow-900 font-black py-6 px-4 rounded-3xl shadow-xl shadow-yellow-400/30 active:scale-95 transition-transform flex flex-col items-center">
-                    <span className="text-xl">Con Amigos</span>
-                    <span className="text-xs font-bold opacity-70 mt-1 uppercase tracking-widest">Cuentas Separadas</span>
+                  <button onClick={() => procesarCrearMesa(true)} className="w-full bg-yellow-400 text-yellow-900 font-black py-6 px-4 rounded-3xl shadow-xl shadow-yellow-400/30 active:scale-95 transition-transform flex flex-col items-center">
+                    <span className="text-xl">Con Amigos</span><span className="text-xs font-bold opacity-70 mt-1 uppercase tracking-widest">Cuentas Separadas</span>
                   </button>
-                  <button onClick={() => procesarEnvio(false)} className="w-full bg-white text-gray-800 font-black py-6 px-4 rounded-3xl border-[3px] border-gray-200 active:scale-95 transition-transform flex flex-col items-center">
-                    <span className="text-xl">Yo Solo</span>
-                    <span className="text-xs font-bold opacity-50 mt-1 uppercase tracking-widest">Mesa Exclusiva</span>
+                  <button onClick={() => procesarCrearMesa(false)} className="w-full bg-white text-gray-800 font-black py-6 px-4 rounded-3xl border-[3px] border-gray-200 active:scale-95 transition-transform flex flex-col items-center">
+                    <span className="text-xl">Yo Solo</span><span className="text-xs font-bold opacity-50 mt-1 uppercase tracking-widest">Mesa Exclusiva</span>
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+          
+          {showReviewModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up">
+                <div className="text-5xl mb-4">⭐</div>
+                <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Qué tal la comida?</h3>
+                <p className="text-sm text-gray-500 mb-8 font-medium">Toca las estrellas para valorarnos.</p>
+                <div className="flex justify-center gap-3 mb-10">
+                  {[1,2,3,4,5].map(star => (
+                    <button key={star} onClick={() => { window.open('https://maps.google.com', '_blank'); setShowReviewModal(false); }} className="text-5xl text-yellow-400 active:scale-75 transition-transform">★</button>
+                  ))}
+                </div>
+                <button onClick={() => setShowReviewModal(false)} className="text-sm font-bold text-gray-400 uppercase tracking-widest">Saltar</button>
               </div>
             </div>
           )}
