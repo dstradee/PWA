@@ -1,4 +1,3 @@
-Html
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -13,18 +12,22 @@ Html
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
-    body { font-family: system-ui, sans-serif; background: #111827; margin: 0; -webkit-tap-highlight-color: transparent; }
-    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-    .animate-slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-    .animate-fade-in { animation: fadeIn 0.3s ease forwards; }
-    .mobile-container { transform: translate(0); }
+    /* 🔥 ACELERACIÓN POR HARDWARE PARA MÁXIMA FLUIDEZ (120FPS) 🔥 */
+    body { font-family: system-ui, sans-serif; background: #111827; margin: 0; -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+    @keyframes slideUp { from { transform: translate3d(0, 100%, 0); } to { transform: translate3d(0, 0, 0); } }
+    .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; will-change: transform; }
+    @keyframes fadeIn { from { opacity: 0; transform: translate3d(0, -10px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
+    .animate-fade-in { animation: fadeIn 0.25s ease forwards; will-change: opacity, transform; }
+    .mobile-container { transform: translate3d(0,0,0); }
+    
+    /* Solución al salto del botón en móviles */
+    .min-h-screen-dvh { min-height: 100vh; min-height: 100dvh; }
   </style>
 </head>
-<body class="flex justify-center min-h-screen">
+<body class="flex justify-center min-h-screen-dvh bg-gray-900">
   
-  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container">
-    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background-color:#fefce8; color:#dc2626;">
+  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen-dvh relative overflow-x-hidden shadow-2xl mobile-container">
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100dvh; background-color:#fefce8; color:#dc2626;">
       <h1 style="font-size:3rem; font-weight:900; margin:0; letter-spacing:-2px;">BOKALIA</h1>
       <p style="font-weight:bold; margin-top:10px; opacity:0.7;">Conectando...</p>
     </div>
@@ -39,7 +42,7 @@ Html
       static getDerivedStateFromError(error) { return { hasError: true, error }; }
       render() {
         if (this.state.hasError) return (
-            <div className="p-8 flex flex-col items-center justify-center min-h-screen bg-red-50 text-center">
+            <div className="p-8 flex flex-col items-center justify-center min-h-screen-dvh bg-red-50 text-center">
               <div className="text-6xl mb-4">🚨</div>
               <h1 className="text-2xl font-black text-red-600 mb-2">Error Crítico</h1>
               <p className="text-gray-700 text-sm mb-6">{this.state.error.toString()}</p>
@@ -62,34 +65,29 @@ Html
     ];
 
     function MainApp() {
-      // Vistas y Auth
+      // INTELIGENCIA DE REDIRECCIÓN: Si escaneas QR, vas a 'mesa'. Si entras normal o tras pagar, vas a 'inicio'
       const [mesaParam, setMesaParam] = useState(null);
-      // 🔥 Inteligencia: Si entra con mesa, va a 'mesa'. Si entra desde inicio normal, va a 'inicio'
-      const [vistaActual, setVistaActual] = useState(new URLSearchParams(window.location.search).get('mesa') ? 'mesa' : 'inicio');
+      const [vistaActual, setVistaActual] = useState('inicio'); 
       
       const [user, setUser] = useState(null);
       const [userProfile, setUserProfile] = useState(null);
       const [authLoading, setAuthLoading] = useState(true);
       
-      // Datos Base
       const [productos, setProductos] = useState([]);
       const [sesionActiva, setSesionActiva] = useState(null);
       const [mesaBloqueada, setMesaBloqueada] = useState(false);
       const [hostName, setHostName] = useState('');
       
-      // Carritos y Rondas
       const [carrito, setCarrito] = useState([]); 
       const [carritosAmigos, setCarritosAmigos] = useState({}); 
       const [rondasBorrador, setRondasBorrador] = useState([]); 
       const [rondasEnviadas, setRondasEnviadas] = useState([]); 
       const [historial, setHistorial] = useState([]);
       
-      // Upselling y Actividad
       const [ultimoPedido, setUltimoPedido] = useState(null);
       const [ultimaActividad, setUltimaActividad] = useState(Date.now());
       const [productoPendiente, setProductoPendiente] = useState(null);
       
-      // Modales UI
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('login'); 
       const [email, setEmail] = useState('');
@@ -100,20 +98,21 @@ Html
       const [showReviewModal, setShowReviewModal] = useState(false);
       const [showTimeoutModal, setShowTimeoutModal] = useState(false);
       const [showTicketModal, setShowTicketModal] = useState(false);
-      const [showInstallTutorial, setShowInstallTutorial] = useState(false); // 🔥 Nuevo Modal Tutorial
       
       const [datosTicket, setDatosTicket] = useState({ subtotal: 0, puntosGanados: 0, items: [] });
-      
       const [notifPerm, setNotifPerm] = useState('default');
       const [toastMsg, setToastMsg] = useState('');
 
       const channelRef = useRef(null);
 
-      // INICIALIZACIÓN
       useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const mesa = urlParams.get('mesa');
-        if (mesa) setMesaParam(parseInt(mesa));
+        if (mesa) {
+           setMesaParam(parseInt(mesa));
+           setVistaActual('mesa');
+        }
+        
         if ('Notification' in window) setNotifPerm(Notification.permission);
 
         cargarMenu();
@@ -131,7 +130,6 @@ Html
         return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
       }, []);
 
-      // VIGILANTE DE MESA GLOBAL
       useEffect(() => {
         if (!mesaParam || authLoading) return;
         verificarSesionMesa();
@@ -146,7 +144,6 @@ Html
         return () => supabase.removeChannel(globalChannel);
       }, [mesaParam, user, authLoading, sesionActiva]);
 
-      // VIGILANTE EN TIEMPO REAL DEL CARRITO Y PAGOS
       useEffect(() => {
         if (sesionActiva) {
           cargarRondasMesa(sesionActiva.id);
@@ -170,6 +167,7 @@ Html
                cargarRondasMesa(sesionActiva.id);
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sesiones_mesa', filter: `id=eq.${sesionActiva.id}` }, (payload) => {
+               // 🔥 EL TRIGGER DEL IPAD (Cobro completado)
                if (payload.new.estado === 'pagada') {
                   cargarTicketFinal(sesionActiva.id);
                }
@@ -180,7 +178,6 @@ Html
         }
       }, [sesionActiva, user]);
 
-      // EFECTO MEMORIA AL LOGUEARSE
       useEffect(() => {
          if (user && productoPendiente && !authLoading) {
             if (!sesionActiva) {
@@ -192,7 +189,6 @@ Html
          }
       }, [user, productoPendiente, authLoading, sesionActiva]);
 
-      // RELOJ INACTIVIDAD
       useEffect(() => {
         if (!sesionActiva || sesionActiva.estado === 'pagada') return;
         const interval = setInterval(() => {
@@ -223,6 +219,19 @@ Html
           cargarHistorial();
         } catch(e) { setUserProfile({ puntos: 0, email: authUser.email }); }
         setAuthLoading(false);
+      };
+
+      const pedirNotificaciones = async () => {
+        if (!('Notification' in window)) {
+          alert("🍏 Si estás en iPhone: Pulsa 'Compartir' (el cuadrado con la flecha) y dale a 'Añadir a la pantalla de inicio'.");
+          return;
+        }
+        try {
+          const permission = await Notification.requestPermission();
+          setNotifPerm(permission);
+          if (permission === 'granted' && user) mostrarToast("¡Avisos activados! 🔔");
+          else if (permission === 'denied') alert("Avisos bloqueados. Actívalos en Ajustes.");
+        } catch (error) { alert("Añade la web a inicio para recibir avisos."); }
       };
 
       const cargarMenu = async () => {
@@ -313,7 +322,6 @@ Html
         else setShowAuthModal(false); 
       };
 
-      // 🍔 FUNCIONES DEL CARRITO DB
       const intentarAñadirAlCarrito = (producto) => {
         if (!user) { 
            setProductoPendiente(producto);
@@ -357,6 +365,7 @@ Html
         try {
            const { data } = await supabase.from('sesiones_mesa').insert([{ num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida }]).select().single();
            setSesionActiva(data);
+           // Efecto Memoria lo captura
         } catch(e) { console.error(e); }
       };
 
@@ -375,7 +384,7 @@ Html
             } else {
                await supabase.from('pedidos_rondas').update({estado: 'enviado', fecha: new Date().toISOString()})
                   .eq('sesion_id', sesionActiva.id).eq('estado', 'listo');
-               mostrarToast("¡Ronda grupal enviada a cocina! 🚀");
+               mostrarToast("¡Ronda enviada a cocina! 🚀");
             }
          } catch(e) { console.error(e); }
       };
@@ -386,9 +395,20 @@ Html
         mostrarToast("El camarero trae la cuenta. ¡Avisado! 💸");
       };
 
-      // 🧾 GENERAR TICKET FINAL Y SALIR
+      const aceptarUnirse = () => {
+         window.sessionStorage.setItem(`unido_mesa_${mesaParam}`, 'true');
+         setShowJoinPrompt(false);
+         verificarSesionMesa();
+      };
+
+      // 🔥 EL TICKET FINAL ANTI-BUG
       const cargarTicketFinal = async (idSesion) => {
          try {
+            if (!user) {
+               // Si alguien estaba mirando sin cuenta, se le expulsa de la mesa pagada
+               return salirDeMesa();
+            }
+
             const { data: misRondas } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', idSesion).eq('usuario_id', user.id).in('estado', ['enviado', 'preparando', 'servido']);
             let totalGastado = 0;
             let misItems = [];
@@ -402,8 +422,9 @@ Html
                }
             }
             
+            // Calculo los puntos reales
             const puntosGanados = Math.floor(totalGastado * 20);
-            if (puntosGanados > 0 && user) {
+            if (puntosGanados > 0) {
                await supabase.from('usuarios').update({ puntos: (userProfile?.puntos || 0) + puntosGanados }).eq('id', user.id);
                const { data: userData } = await supabase.auth.getUser();
                if (userData?.user) procesarUsuario(userData.user);
@@ -417,24 +438,19 @@ Html
          }
       };
 
-      // 🔥 SALIR DE LA MESA Y VOLVER AL DASHBOARD (SIN RECARGAR, SÚPER FLUIDO)
+      // 🔥 EXPULSIÓN LIMPIA AL INICIO
       const salirDeMesa = () => {
          setShowReviewModal(false);
          setShowJoinPrompt(false);
          setShowTimeoutModal(false);
+         setShowTicketModal(false);
          
-         // Limpiamos la URL visualmente sin recargar la página entera
+         // Limpia la URL sin recargar y resetea estados de la mesa
          window.history.replaceState({}, document.title, window.location.pathname);
          setMesaParam(null);
          setSesionActiva(null);
          setMesaBloqueada(false);
-         setVistaActual('inicio'); // Cambiamos al Home Dashboard
-      };
-
-      const aceptarUnirse = () => {
-         window.sessionStorage.setItem(`unido_mesa_${mesaParam}`, 'true');
-         setShowJoinPrompt(false);
-         verificarSesionMesa();
+         setVistaActual('inicio');
       };
 
       const formatMoney = (num) => Number(num).toFixed(2);
@@ -445,7 +461,7 @@ Html
       const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
 
       // ==========================================
-      // UI Y VISTAS
+      // RENDERIZADO UI Y VISTAS
       // ==========================================
 
       if (authLoading) return (
@@ -455,10 +471,10 @@ Html
         </div>
       );
 
-      // BLOQUEOS (Solo aplican si intentas acceder a una mesa)
+      // BLOQUEOS (Solo en Vista Mesa)
       if (mesaBloqueada && mesaParam) {
         return (
-          <div className="min-h-screen bg-gray-900 flex flex-col justify-center items-center p-8 text-center text-white animate-fade-in z-50 absolute w-full h-full">
+          <div className="min-h-screen-dvh bg-gray-900 flex flex-col justify-center items-center p-8 text-center text-white animate-fade-in z-50 absolute w-full h-full">
             <div className="text-8xl mb-8">🔒</div>
             <h1 className="text-4xl font-black mb-4">Mesa Cerrada</h1>
             <p className="text-gray-300 font-medium text-lg leading-relaxed mb-12">El host de esta mesa ha seleccionado <b className="text-yellow-400">Cuenta Única</b>. No se admiten más móviles conectados a esta mesa.</p>
@@ -469,14 +485,12 @@ Html
 
       const miRondaBorrador = rondasBorrador.find(r => r.usuario_id === user?.id);
       const totalItemsMesaPendiente = rondasBorrador.reduce((acc, r) => acc + r.items.length, 0);
-
-      const totalMesaEnviada = rondasEnviadas.reduce((acc, r) => {
-         return acc + r.items.reduce((sum, item) => sum + (item.cantidad * item.precio_unitario), 0);
-      }, 0);
+      const totalMesaEnviada = rondasEnviadas.reduce((acc, r) => acc + r.items.reduce((sum, item) => sum + (item.cantidad * item.precio_unitario), 0), 0);
 
       return (
-        <div className="pb-36 bg-gray-50 min-h-screen relative flex flex-col">
+        <div className="pb-36 bg-gray-50 min-h-screen-dvh relative flex flex-col">
           
+          {/* TOAST FEEDBACK */}
           {toastMsg && (
             <div className="fixed top-24 left-1/2 transform -translate-x-1/2 z-[60] animate-fade-in w-11/12 max-w-sm">
               <div className="bg-green-500 text-white font-black px-6 py-4 rounded-2xl shadow-xl flex items-center justify-between">
@@ -485,7 +499,7 @@ Html
             </div>
           )}
 
-          {/* UNIRSE A MESA OBLIGATORIO */}
+          {/* OBLIGACIÓN DE UNIRSE (Si escaneas mesa ajena) */}
           {showJoinPrompt && (
             <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
@@ -498,29 +512,30 @@ Html
             </div>
           )}
 
-          {/* CABECERA DINÁMICA */}
+          {/* CABECERA ROJA DINÁMICA */}
           <header className="bg-red-600 text-white p-4 sticky top-0 z-30 shadow-md">
             <div className="flex justify-between items-center">
               <h1 className="font-black text-2xl text-yellow-400 tracking-tighter">BOKALIA</h1>
               {user ? (
-                 <button onClick={async () => await supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-3 py-2 rounded-xl">Cerrar Sesión</button> 
+                 <button onClick={async () => await supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-3 py-2 rounded-xl active:bg-red-900">Cerrar Sesión</button> 
               ) : (
                  <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-black bg-yellow-400 text-red-900 px-5 py-2 rounded-xl shadow-sm">Entrar</button>
               )}
             </div>
-            {/* TABS NAVEGACIÓN (Si no hay mesa, muestra pestaña Inicio) */}
+            
+            {/* TABS (Si no hay mesa, enseña la pestaña 'Inicio') */}
             <div className="flex gap-3 border-t border-red-500 pt-3 mt-3 overflow-x-auto">
               {mesaParam ? (
-                 <button onClick={() => setVistaActual('mesa')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='mesa' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Mesa {mesaParam}</button>
+                 <button onClick={() => setVistaActual('mesa')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 transition-colors ${vistaActual==='mesa' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Mesa {mesaParam}</button>
               ) : (
-                 <button onClick={() => setVistaActual('inicio')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='inicio' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Inicio</button>
+                 <button onClick={() => setVistaActual('inicio')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 transition-colors ${vistaActual==='inicio' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Inicio</button>
               )}
-              <button onClick={() => setVistaActual('historial')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='historial' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Historial</button>
-              <button onClick={() => setVistaActual('reservas')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 ${vistaActual==='reservas' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Reservas</button>
+              <button onClick={() => setVistaActual('historial')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 transition-colors ${vistaActual==='historial' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Historial</button>
+              <button onClick={() => setVistaActual('reservas')} className={`font-bold pb-2 border-b-2 whitespace-nowrap px-1 transition-colors ${vistaActual==='reservas' ? 'border-white text-white' : 'border-transparent text-red-200'}`}>Reservas</button>
             </div>
           </header>
 
-          {/* BANNERS INFORMATIVOS (Muestra el tutorial al pulsar en notificaciones) */}
+          {/* BANNERS INFORMATIVOS */}
           {!user && (
              <div onClick={() => { setAuthMode('register'); setShowAuthModal(true); }} className="bg-gradient-to-r from-orange-500 to-red-500 text-white p-4 flex justify-between items-center cursor-pointer shadow-sm">
                 <div>
@@ -535,15 +550,15 @@ Html
              <div className="bg-blue-600 text-white p-4 flex justify-between items-center shadow-sm">
                 <div>
                    <p className="text-sm font-black mb-1">🔔 ¡Ofertas exclusivas!</p>
-                   <p className="text-[10px] font-medium opacity-90 leading-tight">Instala la App para recibir avisos.</p>
+                   <p className="text-[10px] font-medium opacity-90 leading-tight">Activa los avisos en tu dispositivo.</p>
                 </div>
-                <button onClick={() => setShowInstallTutorial(true)} className="bg-white text-blue-600 text-xs font-black px-4 py-2 rounded-xl shadow-sm ml-2">Ver cómo</button>
+                <button onClick={pedirNotificaciones} className="bg-white text-blue-600 text-xs font-black px-4 py-2 rounded-xl shadow-sm ml-2">Activar</button>
              </div>
           )}
 
-          {/* 🔥 VISTA INICIO (DASHBOARD SIN MESA) */}
-          {vistaActual === 'inicio' && (
-            <div className="animate-fade-in flex-grow relative flex flex-col">
+          {/* 🔥 DASHBOARD DE INICIO (Cuando no estás en una mesa) */}
+          {vistaActual === 'inicio' && !mesaParam && (
+             <div className="animate-fade-in flex-grow relative flex flex-col">
               
               <div className="m-4">
                 {!user ? (
@@ -587,14 +602,12 @@ Html
               <div className="p-4 flex-grow flex flex-col justify-center">
                  <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 text-center">
                      <div className="text-5xl mb-4">📍</div>
-                     <h2 className="text-2xl font-black text-gray-800 mb-2 tracking-tighter">¿Estás en el restaurante?</h2>
+                     <h2 className="text-2xl font-black text-gray-800 mb-2 tracking-tighter">¿Estás en el local?</h2>
                      <p className="text-gray-500 mb-6 font-medium text-sm">Escanea el NFC de tu mesa o introduce el número para pedir.</p>
                      <input type="number" id="inputMesaInicio" className="text-center text-4xl font-black w-full p-4 rounded-[1.5rem] bg-gray-50 border-2 border-gray-200 mb-4 outline-none focus:border-red-500 transition-colors" placeholder="Nº de mesa" />
                      <button onClick={() => {
                         const num = document.getElementById('inputMesaInicio').value;
-                        if(num) {
-                           window.location.search = `?mesa=${num}`;
-                        }
+                        if(num) window.location.search = `?mesa=${num}`;
                      }} className="w-full bg-red-600 active:bg-red-700 text-white font-black py-4 rounded-[1.5rem] text-xl shadow-lg transition-transform">
                         Entrar a la mesa
                      </button>
@@ -613,7 +626,7 @@ Html
             </div>
           )}
 
-          {/* VISTA HISTORIAL */}
+          {/* 📜 VISTA HISTORIAL */}
           {vistaActual === 'historial' && (
             <div className="p-4 animate-fade-in flex-grow">
               <h2 className="text-2xl font-black text-gray-800 mb-4 tracking-tight">Tus Pedidos Anteriores</h2>
@@ -656,7 +669,6 @@ Html
                         </div>
                      );
                   })}
-                  
                   <button onClick={borrarHistorial} className="w-full mt-8 bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl active:bg-gray-200 transition-colors">
                     Limpiar mi historial visual
                   </button>
@@ -665,7 +677,7 @@ Html
             </div>
           )}
 
-          {/* VISTA MESA PRINCIPAL (Solo si hay un mesaParam activo) */}
+          {/* VISTA MESA PRINCIPAL (Solo si hay mesa) */}
           {vistaActual === 'mesa' && mesaParam && (
             <div className="animate-fade-in flex-grow relative">
               
@@ -820,9 +832,9 @@ Html
             </div>
           )}
 
-          {/* BOTÓN FLOTANTE "MANDAR A COCINA" */}
+          {/* BOTÓN FLOTANTE "MANDAR A COCINA" (Solo en Vista Mesa) */}
           {totalItemsMesaPendiente > 0 && vistaActual === 'mesa' && !mesaBloqueada && (
-            <div className="fixed bottom-0 left-0 w-full bg-white p-5 shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.15)] z-20 animate-slide-up rounded-t-[2.5rem]">
+            <div className="fixed bottom-0 left-0 w-full bg-white p-5 shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.15)] z-[90] animate-slide-up rounded-t-[2.5rem]">
               <div className="flex justify-between items-center max-w-md mx-auto">
                 <div>
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Mesa pendiente</p>
@@ -838,28 +850,9 @@ Html
             </div>
           )}
 
-          {/* MODAL INSTALAR APP (TUTORIAL MANUAl) */}
-          {showInstallTutorial && (
-             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-end justify-center p-0 animate-fade-in">
-                <div className="bg-white w-full max-w-md rounded-t-[2.5rem] p-8 text-center shadow-2xl relative animate-slide-up">
-                   <button onClick={() => setShowInstallTutorial(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
-                   <div className="text-6xl mb-4 mt-2">📲</div>
-                   <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">Instala la App</h3>
-                   <p className="text-gray-500 font-medium mb-8 text-sm">Mejora tu experiencia, guárdala en tu móvil y recibe alertas de tu pedido.</p>
-                   
-                   <div className="bg-gray-50 p-5 rounded-2xl text-left text-sm font-bold text-gray-700 space-y-4 mb-8 border border-gray-200">
-                      <p className="flex items-start gap-3"><span className="text-lg">1️⃣</span><span className="mt-1">Toca el botón <b>Compartir</b> abajo (el cuadrado con la flecha) o los <b>3 puntitos</b> arriba.</span></p>
-                      <p className="flex items-center gap-3"><span className="text-lg">2️⃣</span><span>Baja por el menú.</span></p>
-                      <p className="flex items-start gap-3"><span className="text-lg">3️⃣</span><span className="mt-1">Toca <b>Añadir a pantalla de inicio</b> ➕.</span></p>
-                   </div>
-                   <button onClick={() => setShowInstallTutorial(false)} className="w-full bg-red-100 text-red-600 font-black py-4 rounded-2xl text-lg active:scale-95 transition-transform">Entendido</button>
-                </div>
-             </div>
-          )}
-
-          {/* MODAL AUTH */}
+          {/* MODALES ABSOLUTES */}
           {showAuthModal && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
               <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
                 <button onClick={() => { setShowAuthModal(false); setProductoPendiente(null); }} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
                 <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">{authMode === 'login' ? 'Hola' : 'Únete'}</h3>
@@ -874,9 +867,8 @@ Html
             </div>
           )}
 
-          {/* MODAL ¿CÓMO VAIS A PEDIR? */}
           {showModoMesa && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up text-center">
                 <button onClick={() => { setShowModoMesa(false); setProductoPendiente(null); }} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
                 <div className="text-6xl mb-6 mt-4">🍕</div>
@@ -898,7 +890,7 @@ Html
 
           {/* 🧾 TICKET FINAL (Se abre cuando el iPad marca como pagada) */}
           {showTicketModal && (
-            <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[120] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up">
                 <div className="text-6xl mb-4">🧾</div>
                 <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¡Cuenta Pagada!</h3>
@@ -934,9 +926,8 @@ Html
             </div>
           )}
 
-          {/* VIGILANTE INACTIVIDAD */}
           {showTimeoutModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[120] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up">
                 <div className="text-6xl mb-4">👀</div>
                 <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Sigues ahí?</h3>
@@ -947,9 +938,8 @@ Html
             </div>
           )}
           
-          {/* RESEÑAS Y RESET FINAL */}
           {showReviewModal && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[130] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up">
                 <div className="text-5xl mb-4">⭐</div>
                 <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">¿Qué tal la comida?</h3>
