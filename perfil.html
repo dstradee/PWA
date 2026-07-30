@@ -22,10 +22,10 @@
 </head>
 <body class="flex justify-center min-h-screen">
   
-  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container">
+  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container pb-10">
     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; background-color:#fefce8; color:#dc2626;">
       <h1 style="font-size:3rem; font-weight:900; margin:0; letter-spacing:-2px;">BOKALIA</h1>
-      <p style="font-weight:bold; margin-top:10px; opacity:0.7;">Cargando tu Wallet...</p>
+      <p style="font-weight:bold; margin-top:10px; opacity:0.7;">Cargando perfil...</p>
     </div>
   </div>
 
@@ -52,20 +52,29 @@
       const [showInstallTutorial, setShowInstallTutorial] = useState(false);
       const [toastMsg, setToastMsg] = useState('');
 
-      // INICIO RÁPIDO
+      // INICIO RÁPIDO CON ESCUDO ANTI-CUELGUE
       useEffect(() => {
+        let isMounted = true;
+
+        // Si en 1.5 segundos Supabase no contesta, forzamos a que desaparezca la pantalla de carga
+        const timerSeguridad = setTimeout(() => {
+           if (isMounted) setLoading(false);
+        }, 1500);
+
         supabase.auth.getSession().then(({ data }) => {
-          if (data?.session?.user) {
+          if (data?.session?.user && isMounted) {
              procesarUsuario(data.session.user);
-          } else {
+          } else if (isMounted) {
              setLoading(false);
           }
-        }).catch(() => setLoading(false));
+        }).catch(() => {
+           if (isMounted) setLoading(false);
+        });
 
-        const { data: authListener } = supabase.auth.onAuthStateChange((_, session) => {
-          if (session?.user) {
+        const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+          if (event === 'SIGNED_IN' && session?.user) {
              procesarUsuario(session.user);
-          } else { 
+          } else if (event === 'SIGNED_OUT') {
              setUser(null); 
              setUserProfile(null); 
              setHistorial([]); 
@@ -73,12 +82,16 @@
           }
         });
 
-        return () => { if (authListener?.subscription) authListener.subscription.unsubscribe(); };
+        return () => { 
+           isMounted = false;
+           clearTimeout(timerSeguridad);
+           if (authListener?.subscription) authListener.subscription.unsubscribe(); 
+        };
       }, []);
 
       const procesarUsuario = async (authUser) => {
-        setUser(authUser);
         try {
+          setUser(authUser);
           // Buscamos puntos
           let { data } = await supabase.from('usuarios').select('*').eq('id', authUser.id).single();
           if (!data) {
@@ -92,16 +105,19 @@
           const seisMesesAtras = new Date();
           seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
           const { data: dataHistorial } = await supabase.from('pedidos_rondas')
-            .select('id, fecha, estado, sesion:sesiones_mesa!inner(estado), items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
-            .eq('usuario_id', authUser.id).eq('oculto_usuario', false).eq('sesiones_mesa.estado', 'pagada')
+            .select('id, fecha, estado, sesion:sesiones_mesa(estado), items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
+            .eq('usuario_id', authUser.id).eq('oculto_usuario', false)
             .gte('fecha', seisMesesAtras.toISOString()).order('fecha', { ascending: false });
             
-          if (dataHistorial) setHistorial(dataHistorial.filter(h => h.items && h.items.length > 0));
-
+          if (dataHistorial) {
+             // Filtramos las que tengan la mesa pagada
+             const historialValido = dataHistorial.filter(h => h.sesion && h.sesion.estado === 'pagada' && h.items && h.items.length > 0);
+             setHistorial(historialValido);
+          }
+          setLoading(false);
         } catch(e) { 
            console.error("Error cargando perfil", e);
            setUserProfile({ puntos: 0, email: authUser.email }); 
-        } finally {
            setLoading(false);
         }
       };
@@ -110,12 +126,15 @@
         setLoading(true);
         const { error } = authMode === 'register' ? await supabase.auth.signUp({ email, password }) : await supabase.auth.signInWithPassword({ email, password });
         if (error) { setLoading(false); alert("Error: " + error.message); }
-        else setShowAuthModal(false);
+        else {
+           setShowAuthModal(false);
+           // El Listener de Auth recogerá el cambio y ejecutará procesarUsuario
+        }
       };
 
       const borrarHistorial = async () => {
         if (!user || historial.length === 0) return;
-        if (window.confirm("¿Limpiar tu historial visual?")) {
+        if (window.confirm("¿Seguro que quieres limpiar tu historial visual?")) {
            await supabase.from('pedidos_rondas').update({ oculto_usuario: true }).eq('usuario_id', user.id);
            setHistorial([]);
            mostrarToast("Historial ocultado 🧹");
@@ -125,7 +144,7 @@
       const formatMoney = (num) => Number(num).toFixed(2);
       const formatDate = (dateStr) => {
         const d = new Date(dateStr);
-        return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} a las ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+        return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()}`;
       };
 
       const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
@@ -164,7 +183,7 @@
 
           <main className="flex-grow p-4 -mt-4 z-0 relative animate-fade-in">
             
-            {/* WALLLET CARD (UNIVERSAL) */}
+            {/* WALLLET CARD */}
             {!user ? (
                <div className="relative overflow-hidden rounded-[2rem] p-8 shadow-xl bg-gradient-to-br from-gray-800 to-black text-white cursor-pointer mt-4" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
                  <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center text-center p-6 backdrop-blur-sm">
@@ -205,7 +224,7 @@
                </div>
             )}
 
-            {/* BANNER INSTALAR APP (Solo si no estás en modo PWA y estás logueado) */}
+            {/* BANNER INSTALAR APP (El tutorial anti-bugs) */}
             {user && !window.matchMedia('(display-mode: standalone)').matches && !window.navigator.standalone && (
                <div onClick={() => setShowInstallTutorial(true)} className="mt-4 bg-blue-600 text-white p-5 rounded-3xl flex justify-between items-center shadow-md cursor-pointer active:scale-95 transition-transform">
                   <div>
@@ -228,13 +247,13 @@
                   </div>
                </div>
                
-               {/* Botón manual por si acaso */}
-               <p className="text-xs font-bold text-gray-400 mt-4 mb-2">¿No funciona el NFC?</p>
+               {/* Botón manual de entrada para redireccionar al Index normal */}
+               <p className="text-xs font-bold text-gray-400 mt-4 mb-2">¿No te funciona el NFC?</p>
                <div className="flex items-center gap-2">
                   <input type="number" id="manualMesa" placeholder="Nº Mesa" className="bg-gray-100 w-full text-center font-black text-xl p-3 rounded-xl outline-none focus:ring-2 ring-red-500" />
                   <button onClick={() => {
                      const num = document.getElementById('manualMesa').value;
-                     if(num) window.location.href = `index.html?mesa=${num}`; 
+                     if(num) window.location.href = `index.html?mesa=${num}`; // Redirige a la PWA de Mesas
                   }} className="bg-red-600 text-white font-black px-6 py-3 rounded-xl active:scale-95 transition-transform">
                      Entrar
                   </button>
@@ -242,17 +261,17 @@
             </div>
 
             {/* HISTORIAL */}
-            <div className="mt-8">
-               <h2 className="text-2xl font-black text-gray-800 mb-4 tracking-tight flex items-center gap-2">
-                  <span>🍔</span> Últimos Pedidos Pagados
+            <div className="mt-10">
+               <h2 className="text-2xl font-black text-gray-800 mb-6 tracking-tight flex items-center gap-2">
+                  <span>🍔</span> Últimos Pedidos
                </h2>
                
                {!user ? (
                   <p className="text-gray-400 font-bold text-center py-6">Inicia sesión para ver tu historial.</p>
                ) : historial.length === 0 ? (
-                  <div className="bg-gray-100 p-8 rounded-[2rem] text-center">
+                  <div className="bg-gray-100 p-8 rounded-3xl text-center">
                      <span className="text-4xl grayscale opacity-50 block mb-3">🧾</span>
-                     <p className="text-gray-500 font-bold">Aún no hay visitas pagadas en tu historial.</p>
+                     <p className="text-gray-500 font-bold">Aún no hay visitas pagadas.</p>
                   </div>
                ) : (
                   <div className="space-y-4">
@@ -266,8 +285,8 @@
                              </div>
                              <ul className="text-sm text-gray-700 space-y-2">
                                {h.items.map((item, idx) => (
-                                 <li key={idx} className="flex gap-3 font-medium items-center">
-                                    <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded-lg text-xs font-black">{item.cantidad}x</span>
+                                 <li key={idx} className="flex gap-3 font-bold items-center">
+                                    <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded-lg text-xs">{item.cantidad}x</span>
                                     {item.producto?.nombre}
                                  </li>
                                ))}
@@ -275,9 +294,6 @@
                            </div>
                         );
                      })}
-                     <button onClick={borrarHistorial} className="w-full mt-6 bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl active:bg-gray-200 transition-colors">
-                       Limpiar historial
-                     </button>
                   </div>
                )}
             </div>
@@ -290,7 +306,7 @@
               <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
                 <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
                 <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">{authMode === 'login' ? 'Hola' : 'Únete'}</h3>
-                <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta Bokalia.' : 'Crea tu cuenta para ganar puntos.'}</p>
+                <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta.' : 'Crea tu cuenta para ganar puntos.'}</p>
                 <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
                 <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
                 <button onClick={handleAuth} className={`w-full text-white font-black py-5 rounded-2xl text-xl active:scale-95 transition-transform mb-4 shadow-lg ${authMode === 'login' ? 'bg-red-600 shadow-red-600/30' : 'bg-yellow-400 text-yellow-900 shadow-yellow-400/50'}`}>
@@ -301,7 +317,7 @@
             </div>
           )}
 
-          {/* TUTORIAL INSTALAR APP */}
+          {/* TUTORIAL INSTALAR APP (Solo sale si se pulsa en el banner) */}
           {showInstallTutorial && (
              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-end justify-center p-0 animate-fade-in">
                 <div className="bg-white w-full max-w-md rounded-t-[2.5rem] p-8 text-center shadow-2xl relative animate-slide-up border-t-8 border-red-600">
