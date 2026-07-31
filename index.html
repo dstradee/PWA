@@ -7,7 +7,7 @@
   
   <script src="https://cdn.tailwindcss.com"></script>
   
-  <!-- 🔥 CONFIGURACIÓN TAILWIND PARA LA MARCA BOKALIA 🔥 -->
+  <!-- 🔥 IDENTIDAD VISUAL BOKALIA 🔥 -->
   <script>
     tailwind.config = {
       theme: {
@@ -34,7 +34,6 @@
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <!-- Fuente corporativa -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 
   <style>
@@ -45,7 +44,6 @@
     .animate-fade-in { animation: fadeIn 0.2s ease forwards; }
     .mobile-container { transform: translate(0); }
     
-    /* Textura muy sutil corporativa */
     .bg-texture {
        background-color: #fdfbf7;
        background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23e25e4c' fill-opacity='0.02' fill-rule='evenodd'%3E%3Ccircle cx='3' cy='3' r='1'/%3E%3Ccircle cx='13' cy='13' r='1'/%3E%3C/g%3E%3C/svg%3E");
@@ -89,6 +87,7 @@
     );
 
     function MainApp() {
+      // ESTADOS EXACTAMENTE IGUALES AL CÓDIGO ORIGINAL
       const [mesaParam, setMesaParam] = useState(null);
       const [user, setUser] = useState(null);
       const [authLoading, setAuthLoading] = useState(true);
@@ -199,9 +198,15 @@
         if (data) setProductos(data);
       };
 
+      // 🔥 ESCUDO ANTIBALAS: Se añade .limit(1) para evitar el crasheo de fantasmas en Supabase
       const verificarSesionMesa = async () => {
         const { data } = await supabase.from('sesiones_mesa')
-          .select('*, host:usuarios(nombre, email)').eq('num_mesa', mesaParam).eq('restaurante_id', RESTAURANTE_ID).neq('estado', 'pagada').maybeSingle();
+          .select('*, host:usuarios(nombre, email)')
+          .eq('num_mesa', mesaParam)
+          .eq('restaurante_id', RESTAURANTE_ID)
+          .neq('estado', 'pagada')
+          .limit(1)  // <--- EL SEGURO DE VIDA
+          .maybeSingle();
         
         if (data) {
           if (!user || data.host_id !== user?.id) {
@@ -263,10 +268,16 @@
         ejecutarAñadirDB(sesionActiva.id, producto);
       };
 
+      // 🔥 ESCUDO ANTIBALAS: Se añade .limit(1) para las rondas también
       const ejecutarAñadirDB = async (idSesion, producto) => {
          try {
             let { data: ronda, error: errRonda } = await supabase.from('pedidos_rondas')
-               .select('id, estado').eq('sesion_id', idSesion).eq('usuario_id', user.id).in('estado', ['pendiente', 'listo']).maybeSingle();
+               .select('id, estado')
+               .eq('sesion_id', idSesion)
+               .eq('usuario_id', user.id)
+               .in('estado', ['pendiente', 'listo'])
+               .limit(1)  // <--- EL SEGURO DE VIDA 2
+               .maybeSingle();
 
             if (errRonda) throw new Error("Error buscando ronda: " + errRonda.message);
 
@@ -286,9 +297,7 @@
             
             cargarRondasMesa(idSesion); 
             mostrarToast(`Añadido: ${producto.nombre} 🛒`);
-         } catch(e) { 
-            alert(e.message); 
-         }
+         } catch(e) { alert(e.message); }
       };
 
       const eliminarItemBorrador = async (itemId) => {
@@ -303,7 +312,6 @@
               restaurante_id: RESTAURANTE_ID, num_mesa: mesaParam, host_id: user.id, estado: 'activa', compartida: esCompartida 
            }]).select().single();
            if(error) throw new Error("Fallo creando mesa: " + error.message);
-           
            setSesionActiva(data);
         } catch(e) { alert(e.message); }
       };
@@ -319,7 +327,6 @@
                .eq('id', miRonda.id);
                
             if(error) throw new Error(error.message);
-
             mostrarToast("¡Enviado a cocina! 🚀");
             cargarRondasMesa(sesionActiva.id);
          } catch(e) { alert("Error al mandar a cocina: " + e.message); }
@@ -360,6 +367,7 @@
          }
       };
 
+      // LA SALIDA ORIGINAL
       const finalizarYSalir = () => {
          window.location.href = 'perfil.html'; 
       };
@@ -369,10 +377,15 @@
         const d = new Date(dateStr);
         return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
       };
+      
       const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
 
+      // ==========================================
+      // UI Y VISTAS (ESTÉTICA BOKALIA APLICADA)
+      // ==========================================
+
       if (authLoading) return (
-        <div className="h-screen flex items-center justify-center flex-col">
+        <div className="h-screen flex items-center justify-center bg-texture flex-col">
            <div className="w-16 h-16 border-4 border-bokalia-beige border-t-bokalia-coral rounded-full animate-spin mb-6"></div>
            <h2 className="text-xl font-bold text-bokalia-coral tracking-tight animate-pulse">Cargando Bokalia...</h2>
         </div>
@@ -380,79 +393,79 @@
 
       if (mesaBloqueada && mesaParam) {
         return (
-          <div className="min-h-screen bg-bokalia-dark/95 flex flex-col justify-center items-center p-8 text-center text-white animate-fade-in z-50 absolute w-full h-full">
-            <div className="text-8xl mb-8">🔒</div>
-            <h1 className="text-4xl font-black mb-4">Mesa Cerrada</h1>
-            <p className="text-gray-300 font-medium text-lg leading-relaxed mb-12">El host de esta mesa ha seleccionado <b className="text-bokalia-coral">Cuenta Única</b>. No se admiten más móviles conectados a esta mesa.</p>
-            <button onClick={() => window.location.href='perfil.html'} className="w-full bg-bokalia-coral active:scale-95 transition-transform text-white font-bold py-4 rounded-2xl shadow-lg shadow-bokalia-coral/30 text-lg">Ir a mi Perfil</button>
+          <div className="min-h-screen bg-bokalia-dark flex flex-col justify-center items-center p-8 text-center text-white animate-fade-in z-50 absolute w-full h-full">
+            <div className="text-8xl mb-8 opacity-80">🔒</div>
+            <h1 className="text-3xl font-black mb-4">Mesa Cerrada</h1>
+            <p className="text-gray-400 font-medium text-sm leading-relaxed mb-12">El host de esta mesa ha seleccionado <b className="text-white">Cuenta Única</b>. No se admiten más móviles conectados a esta mesa.</p>
+            <button onClick={() => window.location.href='perfil.html'} className="w-full bg-white text-bokalia-dark font-bold py-4 rounded-2xl shadow-xl">Ir a mi Perfil</button>
           </div>
         );
       }
 
       if (!mesaParam) return (
-        <div className="min-h-screen flex flex-col justify-center items-center p-6 text-center bg-texture">
-          <div className="bg-white p-10 rounded-[2.5rem] shadow-elegant border border-bokalia-beige w-full">
+        <div className="min-h-screen bg-texture flex flex-col justify-center items-center p-6 text-center">
+          <div className="bg-white p-10 rounded-[2.5rem] shadow-elegant-lg border border-bokalia-beige w-full">
             <h1 className="text-4xl font-black text-bokalia-coral mb-2 tracking-tighter">BOKALIA</h1>
             <p className="text-gray-500 mb-8 font-medium text-sm">¿En qué mesa te sientas?</p>
-            <input type="number" id="inputMesa" className="text-center text-6xl font-black w-full p-4 rounded-3xl bg-bokalia-cream border border-bokalia-beige mb-8 outline-none focus:border-bokalia-coral transition-colors text-bokalia-dark" placeholder="0" />
+            <input type="number" id="inputMesa" className="text-center text-5xl font-black w-full p-4 rounded-2xl bg-bokalia-cream border border-bokalia-beige mb-6 outline-none focus:border-bokalia-coral transition-colors" placeholder="0" />
             <button onClick={() => {
                 const num = document.getElementById('inputMesa').value;
                 if(num) window.location.search = `?mesa=${num}`;
-              }} className="w-full bg-bokalia-coral active:scale-95 transition-transform text-white font-bold py-5 rounded-[1.5rem] text-xl shadow-lg shadow-bokalia-coral/20">
+              }} className="w-full bg-bokalia-coral active:bg-opacity-90 text-white font-bold py-4 rounded-2xl text-lg shadow-lg">
               Empezar
             </button>
-            <button onClick={() => window.location.href='perfil.html'} className="mt-8 text-gray-400 font-bold uppercase tracking-widest text-[10px]">Ir a mi Perfil Bokalia</button>
+            <button onClick={() => window.location.href='perfil.html'} className="mt-8 text-gray-400 font-bold text-sm tracking-widest uppercase">Ir a mi Perfil</button>
           </div>
         </div>
       );
 
       const miRondaBorrador = rondasBorrador.find(r => r.usuario_id === user?.id);
       const totalItemsMesaPendiente = rondasBorrador.reduce((acc, r) => acc + r.items.length, 0);
-
       const totalMesaEnviada = rondasEnviadas.reduce((acc, r) => {
          return acc + r.items.reduce((sum, item) => sum + (parseFloat(item.precio_unitario) * parseInt(item.cantidad)), 0);
       }, 0);
 
       return (
-        <div className="pb-36 bg-texture min-h-screen relative flex flex-col">
+        <div className="pb-36 min-h-screen relative flex flex-col">
           
+          {/* 🔥 TOAST RECTO Y QUE NO BLOQUEA EL CLICK DE COCINA 🔥 */}
           {toastMsg && (
-            <div className="fixed top-24 left-1/2 transform -translate-x-1/2 z-[60] animate-fade-in w-11/12 max-w-sm">
-              <div className="bg-bokalia-dark text-white font-bold px-6 py-4 rounded-2xl shadow-elegant flex items-center justify-between text-center justify-center">
-                <span className="w-full">{toastMsg}</span>
+            <div className="fixed top-24 left-1/2 transform -translate-x-1/2 z-[60] w-[90%] max-w-sm pointer-events-none animate-fade-in flex justify-center">
+              <div className="bg-bokalia-dark text-white font-bold px-6 py-4 rounded-2xl shadow-elegant-lg text-center w-full">
+                <span>{toastMsg}</span>
               </div>
             </div>
           )}
 
           {showJoinPrompt && (
-            <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-bokalia-dark/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up border border-bokalia-beige">
-                <div className="text-5xl mb-4">👋</div>
+                <div className="text-6xl mb-4">👋</div>
                 <h3 className="text-2xl font-black text-bokalia-dark mb-2 tracking-tight">Mesa de {hostName}</h3>
                 <p className="text-gray-500 font-medium text-sm mb-8">Esta mesa ya está abierta. ¿Estás en su grupo?</p>
-                <button onClick={aceptarUnirse} className="w-full bg-bokalia-coral text-white font-bold py-4 rounded-2xl shadow-lg shadow-bokalia-coral/20 text-lg mb-4 active:scale-95 transition-transform">Sí, unirme a la mesa</button>
-                <button onClick={() => window.location.href='perfil.html'} className="w-full bg-bokalia-cream border border-bokalia-beige text-bokalia-dark font-bold py-4 rounded-2xl active:scale-95 transition-transform">No, me he equivocado</button>
+                <button onClick={aceptarUnirse} className="w-full bg-bokalia-coral text-white font-bold py-4 rounded-2xl shadow-lg mb-4 active:scale-95 transition-transform">Sí, unirme a la mesa</button>
+                <button onClick={() => window.location.href='perfil.html'} className="w-full bg-bokalia-cream text-bokalia-dark font-bold py-4 rounded-2xl border border-bokalia-beige">No, me he equivocado</button>
               </div>
             </div>
           )}
 
-          <header className="bg-white text-bokalia-dark p-6 sticky top-0 z-30 shadow-sm border-b border-bokalia-beige flex justify-between items-center rounded-b-[2rem]">
+          <header className="bg-white text-bokalia-dark border-b border-bokalia-beige p-5 sticky top-0 z-30 shadow-sm flex justify-between items-center rounded-b-[2rem]">
             <div>
                <h1 className="font-black text-2xl text-bokalia-coral tracking-tighter">BOKALIA</h1>
                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">MESA {mesaParam}</p>
             </div>
             {user ? (
-               <button onClick={() => window.location.href='perfil.html'} className="text-[11px] font-bold bg-bokalia-cream border border-bokalia-beige text-bokalia-dark px-4 py-2.5 rounded-xl active:scale-95 transition-transform uppercase tracking-widest">Mi Perfil</button> 
+               <button onClick={() => window.location.href='perfil.html'} className="text-[10px] font-bold bg-bokalia-cream border border-bokalia-beige text-gray-500 px-4 py-2.5 rounded-xl shadow-sm active:scale-95 transition-transform uppercase tracking-widest">Mi Perfil</button> 
             ) : (
-               <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-[13px] font-bold bg-bokalia-coral text-white px-6 py-2.5 rounded-xl shadow-md active:scale-95 transition-transform">Entrar</button>
+               <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-bold bg-bokalia-coral text-white px-5 py-2 rounded-xl shadow-md">Entrar</button>
             )}
           </header>
 
           <div className="p-5">
             
             {rondasBorrador.length > 0 && (
-              <div className="mb-10 bg-white p-6 rounded-[2rem] border border-bokalia-beige shadow-elegant animate-fade-in">
-                <h2 className="text-lg font-black text-bokalia-dark mb-5 flex items-center gap-2">
+              <div className="mb-10 bg-white p-6 rounded-[2rem] border border-bokalia-beige shadow-sm animate-fade-in">
+                <h2 className="text-lg font-bold text-bokalia-dark mb-4 flex items-center gap-2">
                   <span className="w-2.5 h-2.5 bg-bokalia-coral rounded-full animate-ping"></span>
                   Borrador de la Mesa
                 </h2>
@@ -466,13 +479,13 @@
                      </div>
                      <ul className="space-y-3">
                         {ronda.items.map(item => (
-                           <li key={item.id} className="flex justify-between items-center text-sm font-medium text-bokalia-dark">
-                              <div className="flex gap-3 items-center">
-                                 <span className="bg-bokalia-cream border border-bokalia-beige text-bokalia-dark px-2 py-0.5 rounded-md text-xs font-bold">{item.cantidad}x</span>
+                           <li key={item.id} className="flex justify-between items-center">
+                              <div className="flex gap-3 items-center text-sm font-medium text-bokalia-dark">
+                                 <span className="bg-bokalia-cream border border-bokalia-beige text-bokalia-dark px-2 py-0.5 rounded-lg text-xs font-bold">{item.cantidad}x</span>
                                  {item.producto?.nombre}
                               </div>
                               {ronda.usuario_id === user?.id && (
-                                 <button onClick={() => eliminarItemBorrador(item.id)} className="bg-bokalia-cream text-red-400 px-3 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wider active:scale-95 transition-all">Quitar</button>
+                                 <button onClick={() => eliminarItemBorrador(item.id)} className="bg-red-50 text-red-500 px-3 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-widest active:scale-95 transition-all">Quitar</button>
                               )}
                            </li>
                         ))}
@@ -483,16 +496,16 @@
             )}
 
             <h2 className="text-xl font-bold text-bokalia-dark mb-4 tracking-tight">La Carta</h2>
-            {productos.length === 0 && <p className="text-gray-500 text-sm font-medium mb-8">Menú no disponible.</p>}
+            {productos.length === 0 && <p className="text-gray-500 text-sm font-medium">Menú no disponible.</p>}
             
             <div className="grid grid-cols-2 gap-4 mb-8">
               {productos.map(p => (
-                <div key={p.id} className="bg-white rounded-3xl overflow-hidden shadow-elegant border border-bokalia-beige flex flex-col relative group">
-                  <div className="h-32 bg-gray-100"><img src={p.imagen_url} className="w-full h-full object-cover" /></div>
+                <div key={p.id} className="bg-white rounded-3xl overflow-hidden shadow-elegant border border-bokalia-beige flex flex-col active:scale-[0.98] transition-transform">
+                  <div className="h-32 bg-bokalia-cream"><img src={p.imagen_url} className="w-full h-full object-cover" /></div>
                   <div className="p-4 flex flex-col flex-grow">
                         <h3 className="font-bold text-bokalia-dark text-sm leading-tight">{p.nombre}</h3>
-                        <p className="text-bokalia-coral font-black mt-2 mb-4 text-lg">{p.precio}€</p>
-                        <button onClick={() => intentarAñadirAlCarrito(p)} className="mt-auto w-full bg-bokalia-coral text-white font-bold py-2.5 rounded-xl text-sm active:scale-95 transition-transform shadow-sm">Añadir</button>
+                        <p className="text-bokalia-coral font-black mt-1 mb-4 text-lg">{p.precio}€</p>
+                        <button onClick={() => intentarAñadirAlCarrito(p)} className="mt-auto w-full bg-bokalia-cream border border-bokalia-beige text-bokalia-dark font-bold py-2.5 rounded-xl text-xs uppercase tracking-widest active:bg-bokalia-coral active:text-white transition-colors">Añadir</button>
                   </div>
                 </div>
               ))}
@@ -500,17 +513,17 @@
 
             {rondasEnviadas.length > 0 && (
               <div className="mb-8">
-                <div className="flex justify-between items-center mb-5">
-                  <h2 className="text-xl font-bold text-bokalia-dark flex items-center gap-2 tracking-tight">
-                    <div className="w-2.5 h-2.5 bg-bokalia-coral rounded-full shadow-[0_0_8px_rgba(226,94,76,0.6)]"></div>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-bokalia-dark flex items-center gap-2">
+                    <div className="w-2 h-2 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.8)]"></div>
                     La Cuenta
                   </h2>
                   {sesionActiva?.estado === 'activa' && (
-                    <button onClick={pedirCuenta} className="bg-bokalia-dark text-white text-[11px] uppercase tracking-widest font-bold px-5 py-2.5 rounded-xl shadow-lg active:scale-95 transition-transform">Pedir Cuenta</button>
+                    <button onClick={pedirCuenta} className="bg-bokalia-dark text-white text-[10px] uppercase tracking-widest font-bold px-4 py-2.5 rounded-xl shadow-md active:scale-95 transition-transform">Pedir Cuenta</button>
                   )}
                 </div>
                 
-                <div className="bg-white p-6 rounded-[2rem] shadow-elegant border border-bokalia-beige mb-4">
+                <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-bokalia-beige mb-4">
                    <div className="text-center mb-6">
                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total a Pagar</p>
                      <p className="text-4xl font-black text-bokalia-coral">{formatMoney(totalMesaEnviada)}€</p>
@@ -520,16 +533,18 @@
                      <div key={ronda.id} className="border-t border-bokalia-beige pt-4 mt-4 first:border-0 first:pt-0 first:mt-0">
                        <div className="flex justify-between items-center mb-3">
                          <p className="font-bold text-gray-400 text-[10px] uppercase tracking-widest">{formatDate(ronda.fecha)}</p>
-                         <span className="text-[9px] font-bold text-bokalia-dark bg-bokalia-cream border border-bokalia-beige px-2 py-0.5 rounded-md uppercase tracking-widest">{ronda.estado}</span>
+                         <span className="text-[9px] font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-md uppercase tracking-widest">{ronda.estado}</span>
                        </div>
-                       <ul className="text-sm text-gray-600 space-y-3">
+                       <ul className="text-sm text-bokalia-dark space-y-3">
                          {ronda.items?.map((item, idx) => (
                            <li key={idx} className="flex gap-3 font-medium items-center text-sm">
-                              <span className="bg-bokalia-cream border border-bokalia-beige text-bokalia-dark px-2 py-0.5 rounded-md text-xs font-bold">{item.cantidad}x</span>
+                              <span className="bg-bokalia-cream border border-bokalia-beige text-bokalia-dark px-2 py-0.5 rounded-lg text-xs font-bold">{item.cantidad}x</span>
                               {item.producto?.nombre} 
                               <span className="text-gray-400 text-xs ml-auto text-right leading-tight">
                                  {item.precio_unitario}€<br/>
-                                 <span className="text-[9px] uppercase tracking-wider text-bokalia-coral font-bold">{ronda.usuario_id === user?.id ? 'Tú' : ronda.usuario?.nombre || 'Amigo'}</span>
+                                 <span className="text-[9px] uppercase tracking-widest font-bold" style={{color: ronda.usuario_id === user?.id ? '#e25e4c' : '#9ca3af'}}>
+                                    {ronda.usuario_id === user?.id ? 'Tú' : ronda.usuario?.nombre || 'Amigo'}
+                                 </span>
                               </span>
                            </li>
                          ))}
@@ -542,7 +557,7 @@
           </div>
 
           {totalItemsMesaPendiente > 0 && !mesaBloqueada && (
-            <div className="fixed bottom-0 left-0 w-full bg-white p-6 shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.05)] border-t border-bokalia-beige z-20 animate-slide-up rounded-t-[2.5rem]">
+            <div className="fixed bottom-0 left-0 w-full bg-white p-6 shadow-elegant-lg z-20 animate-slide-up rounded-t-[2.5rem] border-t border-bokalia-beige">
               <div className="flex justify-between items-center max-w-md mx-auto">
                 <div>
                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Mesa pendiente</p>
@@ -550,7 +565,7 @@
                 </div>
                 <button 
                   onClick={enviarACocinaDB} 
-                  className="bg-bokalia-coral text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-bokalia-coral/30 text-base active:scale-95 transition-transform">
+                  className="bg-bokalia-coral text-white font-bold py-4 px-6 rounded-2xl shadow-lg shadow-bokalia-coral/30 flex items-center gap-2 active:scale-95 transition-transform text-sm uppercase tracking-widest">
                   Mandar a cocina
                 </button>
               </div>
@@ -559,11 +574,11 @@
 
           {/* MODALES ABSOLUTES */}
           {showAuthModal && (
-            <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[110] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
-              <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
-                <button onClick={() => { setShowAuthModal(false); setProductoPendiente(null); }} className="absolute top-6 right-6 text-gray-400 font-bold text-xl bg-bokalia-cream w-10 h-10 rounded-full flex items-center justify-center border border-bokalia-beige active:scale-95">✕</button>
-                <h3 className="text-3xl font-black mb-2 text-bokalia-dark tracking-tight">{authMode === 'login' ? 'Hola de nuevo' : 'Únete al club'}</h3>
-                <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta para pedir.' : 'Crea tu cuenta para ganar puntos.'}</p>
+            <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
+              <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up border border-bokalia-beige">
+                <button onClick={() => { setShowAuthModal(false); setProductoPendiente(null); }} className="absolute top-6 right-6 text-gray-400 font-bold text-xl bg-bokalia-cream w-10 h-10 rounded-full flex items-center justify-center border border-bokalia-beige">✕</button>
+                <h3 className="text-3xl font-black mb-2 text-bokalia-dark tracking-tight">{authMode === 'login' ? 'Hola' : 'Únete al club'}</h3>
+                <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta.' : 'Crea tu cuenta para ganar puntos.'}</p>
                 <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-4 bg-bokalia-cream border border-bokalia-beige rounded-2xl outline-none font-medium focus:border-bokalia-coral transition-colors" />
                 <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-8 p-4 bg-bokalia-cream border border-bokalia-beige rounded-2xl outline-none font-medium focus:border-bokalia-coral transition-colors" />
                 <button onClick={handleAuth} className="w-full text-white font-bold py-4 rounded-2xl text-lg active:scale-95 transition-transform mb-4 shadow-lg bg-bokalia-coral">
@@ -577,17 +592,17 @@
           {showModoMesa && (
             <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up text-center border border-bokalia-beige">
-                <button onClick={() => { setShowModoMesa(false); setProductoPendiente(null); }} className="absolute top-6 right-6 text-gray-400 font-bold text-xl bg-bokalia-cream w-10 h-10 rounded-full flex items-center justify-center border border-bokalia-beige active:scale-95">✕</button>
-                <div className="text-5xl mb-6 mt-4">🍽️</div>
+                <button onClick={() => { setShowModoMesa(false); setProductoPendiente(null); }} className="absolute top-6 right-6 text-gray-400 font-bold text-xl bg-bokalia-cream w-10 h-10 rounded-full flex items-center justify-center border border-bokalia-beige">✕</button>
+                <div className="text-5xl mb-6 mt-4">🍕</div>
                 <h3 className="text-2xl font-black text-bokalia-dark mb-2 tracking-tight">¿Cómo vais a pedir?</h3>
                 <p className="text-gray-500 text-sm font-medium mb-10">Elige la configuración para tu mesa.</p>
                 <div className="flex flex-col gap-4">
-                  <button onClick={() => procesarCrearMesaYPedir(true)} className="w-full bg-bokalia-coral text-white font-bold py-6 px-4 rounded-3xl shadow-lg shadow-bokalia-coral/20 active:scale-95 transition-transform flex flex-col items-center">
-                    <span className="text-xl">Con Amigos</span>
+                  <button onClick={() => procesarCrearMesaYPedir(true)} className="w-full bg-bokalia-coral text-white font-bold py-5 px-4 rounded-2xl shadow-lg shadow-bokalia-coral/30 active:scale-95 transition-transform flex flex-col items-center">
+                    <span className="text-lg">Con Amigos</span>
                     <span className="text-[10px] font-medium opacity-80 mt-1 uppercase tracking-widest text-center leading-tight">Cada uno suma puntos de sus platos<br/>y la cuenta se divide visualmente.</span>
                   </button>
-                  <button onClick={() => procesarCrearMesaYPedir(false)} className="w-full bg-white text-bokalia-dark font-bold py-6 px-4 rounded-3xl border-2 border-bokalia-beige active:scale-95 transition-transform flex flex-col items-center shadow-sm">
-                    <span className="text-xl">Yo Solo</span>
+                  <button onClick={() => procesarCrearMesaYPedir(false)} className="w-full bg-white text-bokalia-dark font-bold py-5 px-4 rounded-2xl border border-bokalia-beige active:scale-95 transition-transform flex flex-col items-center">
+                    <span className="text-lg">Yo Solo</span>
                     <span className="text-[10px] font-medium text-gray-400 mt-1 uppercase tracking-widest text-center leading-tight">Mesa exclusiva. Tú pagas todo<br/>y te llevas todos los puntos.</span>
                   </button>
                 </div>
@@ -595,8 +610,9 @@
             </div>
           )}
 
+          {/* 🧾 TICKET FINAL ORIGINAL */}
           {showTicketModal && (
-            <div className="fixed inset-0 bg-bokalia-dark/80 backdrop-blur-md z-[120] flex items-center justify-center p-4 animate-fade-in">
+            <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[120] flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up border border-bokalia-beige">
                 <div className="text-5xl mb-4">🧾</div>
                 <h3 className="text-2xl font-black text-bokalia-dark mb-2 tracking-tight">¡Cuenta Pagada!</h3>
@@ -607,35 +623,36 @@
                    {datosTicket.items.length === 0 ? <p className="text-sm font-medium text-gray-400 py-2">No tienes consumos propios.</p> : null}
                    {datosTicket.items.map((it, i) => (
                       <div key={i} className="flex justify-between text-sm font-medium text-bokalia-dark mb-2">
-                         <span><span className="font-bold">{it.cantidad}x</span> {it.producto?.nombre}</span>
+                         <span>{it.cantidad}x {it.producto?.nombre}</span>
                          <span className="font-bold">{(parseFloat(it.precio_unitario) * parseInt(it.cantidad)).toFixed(2)}€</span>
                       </div>
                    ))}
-                   <div className="flex justify-between items-end mt-5 pt-4 border-t border-bokalia-beige">
+                   <div className="flex justify-between items-end mt-4 pt-3 border-t border-bokalia-beige">
                       <span className="text-gray-500 font-bold uppercase text-[10px] tracking-widest">Total Pagado</span>
-                      <span className="text-2xl font-black text-bokalia-coral">{datosTicket.subtotal.toFixed(2)}€</span>
+                      <span className="text-xl font-black text-bokalia-coral">{datosTicket.subtotal.toFixed(2)}€</span>
                    </div>
                 </div>
 
-                <div className="bg-white border border-bokalia-beige p-5 rounded-2xl mb-8 shadow-sm">
-                   <p className="font-black text-lg text-bokalia-dark">+{datosTicket.puntosGanados} Puntos VIP 👑</p>
-                   <p className="text-xs font-medium text-gray-500 mt-1">Se han sumado a tu Wallet universal.</p>
+                <div className="bg-white border-2 border-bokalia-beige text-bokalia-dark p-5 rounded-2xl mb-8 shadow-sm">
+                   <p className="font-black text-lg text-bokalia-coral">+{datosTicket.puntosGanados} Puntos VIP 👑</p>
+                   <p className="text-[11px] font-medium text-gray-500 mt-1 uppercase tracking-widest">Se han sumado a tu Wallet</p>
                 </div>
 
                 <button onClick={() => {
                    setShowTicketModal(false);
                    setShowReviewModal(true);
-                }} className="w-full bg-bokalia-coral text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-transform text-lg">
+                }} className="w-full bg-bokalia-coral text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-transform">
                    Continuar
                 </button>
               </div>
             </div>
           )}
           
+          {/* ⭐ ESTRELLITAS ORIGINALES */}
           {showReviewModal && (
             <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[130] flex items-center justify-center p-4 animate-fade-in">
-              <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up border border-bokalia-beige shadow-2xl">
-                <div className="text-5xl mb-4">⭐</div>
+              <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up border border-bokalia-beige">
+                <div className="text-5xl mb-4 mt-4">⭐</div>
                 <h3 className="text-2xl font-black text-bokalia-dark mb-2 tracking-tight">¿Qué tal la comida?</h3>
                 <p className="text-sm text-gray-500 mb-8 font-medium">Toca las estrellas para valorarnos.</p>
                 <div className="flex justify-center gap-3 mb-10">
@@ -643,7 +660,7 @@
                     <button key={star} onClick={finalizarYSalir} className="text-5xl text-yellow-400 active:scale-75 transition-transform drop-shadow-sm">★</button>
                   ))}
                 </div>
-                <button onClick={finalizarYSalir} className="text-[10px] font-bold text-gray-400 uppercase tracking-widest active:scale-95 transition-transform">Saltar y Salir</button>
+                <button onClick={finalizarYSalir} className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pb-2">Saltar y Salir</button>
               </div>
             </div>
           )}
