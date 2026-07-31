@@ -6,6 +6,29 @@
   <title>Bokalia SuperAdmin</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 🔥 IDENTIDAD VISUAL BOKALIA 🔥 -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bokalia: {
+              coral: '#e25e4c',  
+              cream: '#fdfbf7',  
+              beige: '#f4ede5',  
+              dark: '#302b28'    
+            }
+          },
+          boxShadow: {
+            'elegant': '0 8px 30px rgba(0, 0, 0, 0.04)',
+            'elegant-lg': '0 15px 40px rgba(0, 0, 0, 0.06)',
+          }
+        }
+      }
+    }
+  </script>
+
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
@@ -13,13 +36,20 @@
   
   <script src="https://widget.cloudinary.com/v2.0/global/all.js" type="text/javascript"></script>
 
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
   <style>
-    body { font-family: system-ui, sans-serif; background: #f3f4f6; margin: 0; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #fdfbf7; margin: 0; }
     .animate-fade-in { animation: fadeIn 0.3s ease forwards; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    
+    .bg-texture {
+       background-color: #fdfbf7;
+       background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23e25e4c' fill-opacity='0.02' fill-rule='evenodd'%3E%3Ccircle cx='3' cy='3' r='1'/%3E%3Ccircle cx='13' cy='13' r='1'/%3E%3C/g%3E%3C/svg%3E");
+    }
   </style>
 </head>
-<body class="bg-gray-100 min-h-screen text-gray-800">
+<body class="text-bokalia-dark bg-texture">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -34,6 +64,11 @@
     const CLOUDINARY_UPLOAD_PRESET = "ml_default"; 
 
     function SuperAdminApp() {
+      // 🔥 ESTADOS DE SEGURIDAD 🔥
+      const [isAuthenticated, setIsAuthenticated] = useState(false);
+      const [pinInput, setPinInput] = useState('');
+      const [isVerifying, setIsVerifying] = useState(false);
+
       const [vista, setVista] = useState('dashboard'); 
       const [subVista, setSubVista] = useState('platos'); 
       
@@ -48,7 +83,7 @@
       const [loading, setLoading] = useState(true);
 
       const [nuevoRestNombre, setNuevoRestNombre] = useState('');
-      const [nuevoRestColor, setNuevoRestColor] = useState('#dc2626'); 
+      const [nuevoRestColor, setNuevoRestColor] = useState('#e25e4c'); 
 
       // Formularios
       const [prodNombre, setProdNombre] = useState('');
@@ -70,11 +105,39 @@
       const [notiMensaje, setNotiMensaje] = useState('');
       const [notiDestino, setNotiDestino] = useState('global');
 
-      useEffect(() => { cargarRestaurantes(); }, []);
+      useEffect(() => { 
+         // Comprobar si ya estamos logueados en este ordenador
+         if (localStorage.getItem('bokalia_admin_vip') === 'true') {
+            setIsAuthenticated(true);
+         }
+         cargarRestaurantes(); 
+      }, []);
 
       useEffect(() => {
-         if (vista === 'notificaciones') cargarNotificaciones();
-      }, [vista]);
+         if (vista === 'notificaciones' && isAuthenticated) cargarNotificaciones();
+      }, [vista, isAuthenticated]);
+
+      // 🔥 LÓGICA DE SEGURIDAD (PIN)
+      const verificarPin = async (e) => {
+         e.preventDefault();
+         setIsVerifying(true);
+         const { data, error } = await supabase.rpc('validar_pin_superadmin', { pin_intento: pinInput });
+         setIsVerifying(false);
+         
+         if (data === true) {
+            localStorage.setItem('bokalia_admin_vip', 'true');
+            setIsAuthenticated(true);
+         } else {
+            alert("❌ PIN Incorrecto o no autorizado.");
+            setPinInput('');
+         }
+      };
+
+      const cerrarSesionSegura = () => {
+         localStorage.removeItem('bokalia_admin_vip');
+         setIsAuthenticated(false);
+         setPinInput('');
+      };
 
       const cargarRestaurantes = async () => {
         setLoading(true);
@@ -89,19 +152,17 @@
         const { data, error } = await supabase.from('restaurantes').insert([{ nombre: nuevoRestNombre, color_tema: nuevoRestColor }]).select().single();
         if (data) {
            setRestaurantes([data, ...restaurantes]);
-           setNuevoRestNombre(''); setNuevoRestColor('#dc2626');
+           setNuevoRestNombre(''); setNuevoRestColor('#e25e4c');
            alert("✅ Restaurante creado con éxito");
         } else alert("Error: " + error.message);
       };
 
-      // 🔥 NUEVO: BORRAR RESTAURANTE Y TODO SU CONTENIDO (EFECTO CASCADA SEGURO)
       const borrarRestaurante = async (id, nombre) => {
          const confirmacion = window.prompt(`⚠️ PELIGRO EXTREMO: Vas a borrar el restaurante "${nombre}" y TODOS sus platos, recompensas y niveles.\n\nEscribe la palabra BORRAR (en mayúsculas) para confirmar:`);
          if (confirmacion !== 'BORRAR') return alert("Borrado cancelado. La palabra no coincide.");
          
          setLoading(true);
          try {
-            // Borramos manualmente para asegurar que no queden restos si falta algún CASCADE en tu DB
             await supabase.from('productos').delete().eq('restaurante_id', id);
             await supabase.from('recompensas').delete().eq('restaurante_id', id);
             await supabase.from('niveles_membresia').delete().eq('restaurante_id', id);
@@ -111,35 +172,25 @@
             if (error) throw error;
 
             setRestaurantes(restaurantes.filter(r => r.id !== id));
-            if (restauranteActivo?.id === id) {
-               setRestauranteActivo(null);
-               setVista('dashboard');
-            }
+            if (restauranteActivo?.id === id) { setRestauranteActivo(null); setVista('dashboard'); }
             alert("🗑️ Restaurante eliminado por completo.");
-         } catch(e) {
-            alert("Error al borrar el restaurante: " + e.message);
-         }
+         } catch(e) { alert("Error al borrar el restaurante: " + e.message); }
          setLoading(false);
       };
 
       const editarColor = async (id, colorNuevo) => {
          const { error } = await supabase.from('restaurantes').update({ color_tema: colorNuevo }).eq('id', id);
-         if (!error) {
-            setRestaurantes(restaurantes.map(r => r.id === id ? { ...r, color_tema: colorNuevo } : r));
-         }
+         if (!error) setRestaurantes(restaurantes.map(r => r.id === id ? { ...r, color_tema: colorNuevo } : r));
       };
 
       const abrirRestaurante = async (rest) => {
          setRestauranteActivo(rest);
          setVista('restaurante');
          setSubVista('platos'); 
-         
          const { data: prods } = await supabase.from('productos').select('*').eq('restaurante_id', rest.id).order('categoria');
          if (prods) setProductos(prods);
-
          const { data: recs } = await supabase.from('recompensas').select('*').eq('restaurante_id', rest.id).order('coste_puntos');
          if (recs) setRecompensas(recs);
-
          const { data: nivs } = await supabase.from('niveles_membresia').select('*').eq('restaurante_id', rest.id).order('puntos_minimos');
          if (nivs) setNiveles(nivs);
       };
@@ -158,15 +209,10 @@
          widget.open();
       };
 
-      // PLATOS
       const añadirProducto = async (e) => {
          e.preventDefault();
          if (!prodNombre || !prodPrecio) return;
-         const nuevoProd = {
-            restaurante_id: restauranteActivo.id, nombre: prodNombre, descripcion: prodDesc,
-            precio: parseFloat(prodPrecio.replace(',','.')), imagen_url: prodImg || 'https://via.placeholder.com/500', 
-            categoria: prodCat, activo: true
-         };
+         const nuevoProd = { restaurante_id: restauranteActivo.id, nombre: prodNombre, descripcion: prodDesc, precio: parseFloat(prodPrecio.replace(',','.')), imagen_url: prodImg || 'https://via.placeholder.com/500', categoria: prodCat, activo: true };
          const { data, error } = await supabase.from('productos').insert([nuevoProd]).select().single();
          if (data) {
             setProductos([...productos, data]);
@@ -181,14 +227,10 @@
          }
       };
 
-      // RECOMPENSAS
       const añadirRecompensa = async (e) => {
          e.preventDefault();
          if (!recTitulo || !recCoste) return;
-         const nuevaRec = {
-            restaurante_id: restauranteActivo.id, titulo: recTitulo, descripcion: recDesc,
-            coste_puntos: parseInt(recCoste), imagen_url: recImg || 'https://via.placeholder.com/500', activo: true
-         };
+         const nuevaRec = { restaurante_id: restauranteActivo.id, titulo: recTitulo, descripcion: recDesc, coste_puntos: parseInt(recCoste), imagen_url: recImg || 'https://via.placeholder.com/500', activo: true };
          const { data, error } = await supabase.from('recompensas').insert([nuevaRec]).select().single();
          if (data) {
             setRecompensas([...recompensas, data].sort((a,b) => a.coste_puntos - b.coste_puntos));
@@ -203,7 +245,6 @@
          }
       };
 
-      // NIVELES
       const añadirNivel = async (e) => {
          e.preventDefault();
          if (!nivNombre || !nivPuntos) return;
@@ -222,26 +263,18 @@
          }
       };
 
-      // 🔥 NOTIFICACIONES (Y LIMPIEZA DE 24 HORAS)
       const cargarNotificaciones = async () => {
-         // 1. Borramos silenciosamente las que tienen más de 24 horas
-         const hace24h = new Date();
-         hace24h.setHours(hace24h.getHours() - 24);
+         const hace24h = new Date(); hace24h.setHours(hace24h.getHours() - 24);
          await supabase.from('notificaciones').delete().lt('creado_en', hace24h.toISOString());
-
-         // 2. Cargamos las que quedan (las recientes)
-         const { data } = await supabase.from('notificaciones')
-            .select('*, restaurante:restaurantes(nombre)').order('creado_en', { ascending: false });
+         const { data } = await supabase.from('notificaciones').select('*, restaurante:restaurantes(nombre)').order('creado_en', { ascending: false });
          if (data) setNotificaciones(data);
       };
-
       const enviarNotificacion = async (e) => {
          e.preventDefault();
          if (!notiTitulo || !notiMensaje) return;
          const esGlobal = notiDestino === 'global';
          const restId = esGlobal ? null : notiDestino;
          const nuevaNoti = { titulo: notiTitulo, mensaje: notiMensaje, es_global: esGlobal, restaurante_id: restId };
-         
          const { data, error } = await supabase.from('notificaciones').insert([nuevaNoti]).select('*, restaurante:restaurantes(nombre)').single();
          if (data) {
             setNotificaciones([data, ...notificaciones]);
@@ -251,63 +284,104 @@
       };
 
       const copiarId = (id) => { navigator.clipboard.writeText(id); alert("🔑 ID Copiado:\n" + id); };
-      const formatDate = (dateStr) => {
-         const d = new Date(dateStr);
-         return `${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
-      };
+      const formatDate = (dateStr) => { const d = new Date(dateStr); return `${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`; };
 
-      if (loading) return <div className="h-screen flex items-center justify-center font-black text-2xl animate-pulse text-gray-400">Cargando Baticueva...</div>;
+      if (loading) return (
+         <div className="h-screen flex items-center justify-center flex-col bg-texture">
+            <div className="w-16 h-16 border-4 border-bokalia-beige border-t-bokalia-coral rounded-full animate-spin mb-6"></div>
+         </div>
+      );
 
+      // 🔥 PANTALLA DE BLOQUEO (SI NO ESTÁ AUTENTICADO)
+      if (!isAuthenticated) {
+         return (
+            <div className="min-h-screen flex items-center justify-center p-4 bg-texture animate-fade-in">
+               <div className="bg-white p-10 rounded-[2.5rem] shadow-elegant-lg max-w-sm w-full text-center border border-bokalia-beige">
+                  <div className="text-4xl mb-4">🔒</div>
+                  <h1 className="text-3xl font-black text-bokalia-coral mb-2 tracking-tighter">BOKALIA OS</h1>
+                  <p className="text-gray-500 font-medium mb-8 text-sm">Acceso Restringido</p>
+                  
+                  <form onSubmit={verificarPin}>
+                     <input 
+                        type="password" 
+                        value={pinInput} 
+                        onChange={e => setPinInput(e.target.value)} 
+                        placeholder="••••••" 
+                        className="w-full bg-bokalia-cream border border-bokalia-beige p-4 rounded-2xl text-center text-3xl tracking-[0.5em] font-black text-bokalia-dark outline-none focus:border-bokalia-coral mb-6 transition-colors" 
+                        autoFocus 
+                     />
+                     <button type="submit" disabled={isVerifying} className="w-full bg-bokalia-coral text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform shadow-lg shadow-bokalia-coral/30">
+                        {isVerifying ? 'Verificando...' : 'Desbloquear Panel'}
+                     </button>
+                  </form>
+               </div>
+            </div>
+         );
+      }
+
+      // 🔥 PANEL SUPERADMIN (SI ESTÁ AUTENTICADO)
       return (
-         <div className="min-h-screen flex flex-col md:flex-row">
-            <aside className="w-full md:w-64 bg-gray-900 text-white flex flex-col shadow-2xl z-10 shrink-0">
-               <div className="p-6 border-b border-gray-800 text-center md:text-left">
-                  <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-yellow-500">BOKALIA OS</h1>
-                  <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-1">SuperAdmin</p>
+         <div className="min-h-screen flex flex-col md:flex-row bg-texture">
+            
+            {/* SIDEBAR CORPORATIVO */}
+            <aside className="w-full md:w-64 bg-bokalia-dark text-white flex flex-col shadow-2xl z-10 shrink-0">
+               <div className="p-8 border-b border-white/10 text-center md:text-left">
+                  <h1 className="text-3xl font-black text-bokalia-cream tracking-tighter">BOKALIA</h1>
+                  <p className="text-[10px] font-bold text-bokalia-coral uppercase tracking-widest mt-1">SuperAdmin OS</p>
                </div>
                <nav className="p-4 flex-grow space-y-2">
-                  <button onClick={() => setVista('dashboard')} className={`w-full text-left px-4 py-3 rounded-xl font-bold transition-colors ${vista === 'dashboard' || vista === 'restaurante' ? 'bg-red-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>🏢 Mis Locales</button>
-                  <button onClick={() => setVista('notificaciones')} className={`w-full text-left px-4 py-3 rounded-xl font-bold transition-colors flex items-center gap-2 ${vista === 'notificaciones' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>📣 Avisos Push</button>
+                  <button onClick={() => setVista('dashboard')} className={`w-full text-left px-5 py-4 rounded-2xl font-bold transition-all ${vista === 'dashboard' || vista === 'restaurante' ? 'bg-bokalia-coral text-white shadow-lg shadow-bokalia-coral/20' : 'text-gray-400 hover:bg-white/5'}`}>🏢 Mis Locales</button>
+                  <button onClick={() => setVista('notificaciones')} className={`w-full text-left px-5 py-4 rounded-2xl font-bold transition-all flex items-center gap-2 ${vista === 'notificaciones' ? 'bg-bokalia-coral text-white shadow-lg shadow-bokalia-coral/20' : 'text-gray-400 hover:bg-white/5'}`}>📣 Avisos Push</button>
                </nav>
+               
+               {/* BOTÓN CERRAR SESIÓN SEGURA */}
+               <div className="p-4 border-t border-white/10">
+                  <button onClick={cerrarSesionSegura} className="w-full text-center px-4 py-3 rounded-xl font-bold text-gray-500 hover:text-white hover:bg-white/5 transition-colors text-sm">
+                     Cerrar Sesión Segura
+                  </button>
+               </div>
             </aside>
 
-            <main className="flex-grow p-6 md:p-10 overflow-y-auto bg-gray-50 animate-fade-in">
+            <main className="flex-grow p-6 md:p-10 overflow-y-auto animate-fade-in">
                
                {vista === 'dashboard' && (
                   <div className="max-w-5xl mx-auto animate-fade-in">
-                     <h2 className="text-4xl font-black text-gray-900 mb-8">Tus Restaurantes</h2>
-                     <form onSubmit={crearRestaurante} className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-200 mb-8 flex flex-col md:flex-row gap-4 items-center">
-                        <input type="text" placeholder="Nombre del Local..." required value={nuevoRestNombre} onChange={e => setNuevoRestNombre(e.target.value)} className="flex-grow bg-gray-50 border border-gray-200 p-4 rounded-xl font-bold outline-none w-full" />
-                        <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-200 w-full md:w-auto">
-                           <label className="text-xs font-bold text-gray-500 uppercase">Color Marca:</label>
-                           <input type="color" value={nuevoRestColor} onChange={e => setNuevoRestColor(e.target.value)} className="w-10 h-10 rounded cursor-pointer border-0 p-0" />
+                     <h2 className="text-3xl font-black text-bokalia-dark mb-8 tracking-tight">Tus Restaurantes</h2>
+                     
+                     <form onSubmit={crearRestaurante} className="bg-white p-6 rounded-[2rem] shadow-elegant border border-bokalia-beige mb-10 flex flex-col md:flex-row gap-4 items-center">
+                        <input type="text" placeholder="Nombre del nuevo local..." required value={nuevoRestNombre} onChange={e => setNuevoRestNombre(e.target.value)} className="flex-grow bg-bokalia-cream border border-bokalia-beige p-4 rounded-2xl font-bold outline-none focus:border-bokalia-coral w-full transition-colors" />
+                        <div className="flex items-center gap-3 bg-bokalia-cream p-3 rounded-2xl border border-bokalia-beige w-full md:w-auto">
+                           <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Color:</label>
+                           <input type="color" value={nuevoRestColor} onChange={e => setNuevoRestColor(e.target.value)} className="w-10 h-10 rounded-xl cursor-pointer border-0 p-0" />
                         </div>
-                        <button type="submit" className="bg-gray-900 hover:bg-black text-white font-black px-8 py-4 rounded-xl w-full md:w-auto">+ Añadir</button>
+                        <button type="submit" className="bg-bokalia-dark hover:bg-black text-white font-bold px-8 py-4 rounded-2xl w-full md:w-auto active:scale-95 transition-transform shadow-lg">Crear Local</button>
                      </form>
                      
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {restaurantes.map(r => (
-                           <div key={r.id} className="bg-white p-6 rounded-[2rem] shadow-sm border-t-8 transition-shadow relative group" style={{ borderColor: r.color_tema || '#dc2626' }}>
+                           <div key={r.id} className="bg-white p-8 rounded-[2rem] shadow-elegant border border-bokalia-beige relative group flex flex-col h-full">
                               
-                              {/* 🔥 BOTÓN ELIMINAR LOCAL */}
-                              <button onClick={() => borrarRestaurante(r.id, r.nombre)} className="absolute top-6 right-6 text-red-200 hover:text-red-600 transition-colors" title="Borrar Restaurante">
+                              <button onClick={() => borrarRestaurante(r.id, r.nombre)} className="absolute top-6 right-6 text-gray-300 hover:text-red-500 transition-colors" title="Borrar Restaurante">
                                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                               </button>
 
-                              <div className="flex justify-between items-start mb-4 pr-10">
-                                 <h3 className="text-2xl font-black text-gray-800">{r.nombre}</h3>
-                                 <div className="flex items-center gap-2">
-                                    <input type="color" defaultValue={r.color_tema || '#dc2626'} onBlur={e => editarColor(r.id, e.target.value)} className="w-6 h-6 rounded cursor-pointer" />
+                              <div className="flex justify-between items-start mb-6 pr-10">
+                                 <div className="flex items-center gap-3">
+                                    <div className="w-3 h-10 rounded-full" style={{ backgroundColor: r.color_tema || '#e25e4c' }}></div>
+                                    <h3 className="text-2xl font-black text-bokalia-dark">{r.nombre}</h3>
                                  </div>
+                                 <input type="color" defaultValue={r.color_tema || '#e25e4c'} onBlur={e => editarColor(r.id, e.target.value)} className="w-8 h-8 rounded-lg cursor-pointer opacity-50 hover:opacity-100 transition-opacity" title="Cambiar color" />
                               </div>
-                              <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 mb-6 flex justify-between items-center cursor-pointer hover:bg-gray-100" onClick={() => copiarId(r.id)}>
+
+                              <div className="bg-bokalia-cream p-4 rounded-2xl border border-bokalia-beige mb-8 flex justify-between items-center cursor-pointer hover:bg-bokalia-beige transition-colors" onClick={() => copiarId(r.id)}>
                                  <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ID del Restaurante</p>
+                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">ID del Restaurante</p>
                                     <p className="text-sm font-mono text-gray-700 truncate max-w-[200px]">{r.id}</p>
                                  </div>
-                                 <span className="text-xl">📋</span>
+                                 <span className="text-xl opacity-50">📋</span>
                               </div>
-                              <button onClick={() => abrirRestaurante(r)} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-black py-3 rounded-xl transition-colors">Gestionar Local →</button>
+
+                              <button onClick={() => abrirRestaurante(r)} className="mt-auto w-full bg-bokalia-coral text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform shadow-lg shadow-bokalia-coral/20">Entrar al Panel →</button>
                            </div>
                         ))}
                      </div>
@@ -316,62 +390,67 @@
 
                {vista === 'restaurante' && restauranteActivo && (
                   <div className="max-w-5xl mx-auto animate-fade-in">
-                     <button onClick={() => setVista('dashboard')} className="text-gray-500 font-bold hover:text-gray-900 mb-6 flex items-center gap-2">← Volver a locales</button>
-                     <div className="mb-6 flex flex-col md:flex-row md:items-end justify-between border-b border-gray-200 pb-4">
-                        <div>
-                           <h2 className="text-4xl font-black text-gray-900 tracking-tight">{restauranteActivo.nombre}</h2>
-                           <p className="text-gray-500 font-medium mt-1">Panel de Control del Local</p>
+                     <button onClick={() => setVista('dashboard')} className="text-gray-400 font-bold hover:text-bokalia-dark mb-6 flex items-center gap-2 transition-colors">
+                        ← Volver a locales
+                     </button>
+                     <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between border-b border-bokalia-beige pb-6">
+                        <div className="flex items-center gap-3">
+                           <div className="w-4 h-12 rounded-full" style={{ backgroundColor: restauranteActivo.color_tema || '#e25e4c' }}></div>
+                           <div>
+                              <h2 className="text-4xl font-black text-bokalia-dark tracking-tight">{restauranteActivo.nombre}</h2>
+                              <p className="text-gray-500 font-medium mt-1">Panel de Control</p>
+                           </div>
                         </div>
-                        <div className="flex gap-2 mt-4 md:mt-0 flex-wrap">
-                           <button onClick={() => setSubVista('platos')} className={`px-5 py-2 rounded-xl font-black transition-colors ${subVista === 'platos' ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'}`}>🍽️ Menú</button>
-                           <button onClick={() => setSubVista('recompensas')} className={`px-5 py-2 rounded-xl font-black transition-colors ${subVista === 'recompensas' ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'}`}>🎁 Premios</button>
-                           <button onClick={() => setSubVista('niveles')} className={`px-5 py-2 rounded-xl font-black transition-colors ${subVista === 'niveles' ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'}`}>⭐ Niveles VIP</button>
+                        <div className="flex gap-2 mt-6 md:mt-0 flex-wrap bg-white p-2 rounded-2xl shadow-sm border border-bokalia-beige">
+                           <button onClick={() => setSubVista('platos')} className={`px-6 py-2.5 rounded-xl font-bold transition-colors ${subVista === 'platos' ? 'bg-bokalia-coral text-white shadow-md' : 'text-gray-500 hover:bg-bokalia-cream'}`}>🍽️ Menú</button>
+                           <button onClick={() => setSubVista('recompensas')} className={`px-6 py-2.5 rounded-xl font-bold transition-colors ${subVista === 'recompensas' ? 'bg-bokalia-coral text-white shadow-md' : 'text-gray-500 hover:bg-bokalia-cream'}`}>🎁 Premios</button>
+                           <button onClick={() => setSubVista('niveles')} className={`px-6 py-2.5 rounded-xl font-bold transition-colors ${subVista === 'niveles' ? 'bg-bokalia-coral text-white shadow-md' : 'text-gray-500 hover:bg-bokalia-cream'}`}>⭐ Rangos</button>
                         </div>
                      </div>
 
-                     {/* (SUBVISTAS: Platos, Recompensas y Niveles se mantienen idénticos) */}
+                     {/* VISTAS INTERNAS DEL LOCAL (El código funcional es idéntico, solo adaptamos las clases Tailwind) */}
                      {subVista === 'platos' && (
                         <div className="flex flex-col lg:flex-row gap-8 animate-fade-in">
                            <div className="lg:w-1/3">
-                              <form onSubmit={añadirProducto} className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-200 sticky top-6">
-                                 <h3 className="text-xl font-black text-gray-800 mb-6 border-b border-gray-100 pb-4">Añadir Plato</h3>
-                                 <div className="space-y-4">
+                              <form onSubmit={añadirProducto} className="bg-white p-8 rounded-[2.5rem] shadow-elegant border border-bokalia-beige sticky top-6">
+                                 <h3 className="text-xl font-black text-bokalia-dark mb-6 tracking-tight">Añadir Plato</h3>
+                                 <div className="space-y-5">
                                     <div>
-                                       <label className="text-xs font-bold text-gray-500 uppercase">Foto del plato</label>
-                                       <div className="mt-1 flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 mb-2">
-                                          {prodImg ? <img src={prodImg} className="h-32 w-full object-cover rounded-lg mb-3 shadow-sm border border-gray-200"/> : <span className="text-3xl grayscale opacity-50 mb-2">📸</span>}
-                                          <button type="button" onClick={() => abrirCloudinary('producto')} className="bg-blue-600 text-white text-xs font-black px-4 py-2 rounded-lg shadow-sm">{prodImg ? 'Cambiar Foto' : 'Subir Imagen'}</button>
+                                       <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-2">Foto del plato</label>
+                                       <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-bokalia-beige rounded-2xl bg-bokalia-cream mb-2">
+                                          {prodImg ? <img src={prodImg} className="h-32 w-full object-cover rounded-xl mb-4 shadow-sm border border-bokalia-beige"/> : <span className="text-4xl opacity-30 mb-4">📸</span>}
+                                          <button type="button" onClick={() => abrirCloudinary('producto')} className="bg-white text-bokalia-dark border border-bokalia-beige text-xs font-bold px-5 py-2.5 rounded-xl shadow-sm hover:bg-gray-50">{prodImg ? 'Cambiar Foto' : 'Subir Imagen'}</button>
                                        </div>
-                                       <input type="url" value={prodImg} onChange={e => setProdImg(e.target.value)} placeholder="O pega el enlace manualmente aquí" className="w-full text-xs font-mono text-gray-500 p-2 bg-gray-100 rounded-lg outline-none focus:ring-2 ring-blue-200" />
+                                       <input type="url" value={prodImg} onChange={e => setProdImg(e.target.value)} placeholder="O pega el enlace manual..." className="w-full text-xs text-gray-500 p-3 bg-bokalia-cream rounded-xl outline-none focus:border-bokalia-coral border border-transparent transition-colors" />
                                     </div>
-                                    <div><label className="text-xs font-bold text-gray-500">NOMBRE</label><input type="text" required value={prodNombre} onChange={e => setProdNombre(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border outline-none focus:border-red-500" /></div>
+                                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Nombre</label><input type="text" required value={prodNombre} onChange={e => setProdNombre(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral font-bold" /></div>
                                     <div className="flex gap-4">
-                                       <div className="w-1/2"><label className="text-xs font-bold text-gray-500">PRECIO (€)</label><input type="number" step="0.01" required value={prodPrecio} onChange={e => setProdPrecio(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border outline-none focus:border-red-500" /></div>
-                                       <div className="w-1/2"><label className="text-xs font-bold text-gray-500">CATEGORÍA</label>
-                                          <select value={prodCat} onChange={e => setProdCat(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border outline-none focus:border-red-500"><option>Principal</option><option>Entrantes</option><option>Bebidas</option><option>Postres</option></select>
+                                       <div className="w-1/2"><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Precio (€)</label><input type="number" step="0.01" required value={prodPrecio} onChange={e => setProdPrecio(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral font-bold" /></div>
+                                       <div className="w-1/2"><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Categoría</label>
+                                          <select value={prodCat} onChange={e => setProdCat(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral font-bold text-sm"><option>Principal</option><option>Entrantes</option><option>Bebidas</option><option>Postres</option></select>
                                        </div>
                                     </div>
-                                    <div><label className="text-xs font-bold text-gray-500">DESCRIPCIÓN</label><textarea value={prodDesc} onChange={e => setProdDesc(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border outline-none focus:border-red-500" rows="2"></textarea></div>
+                                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Descripción</label><textarea value={prodDesc} onChange={e => setProdDesc(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral resize-none" rows="2"></textarea></div>
                                  </div>
-                                 <button type="submit" className="w-full bg-gray-900 text-white font-black py-4 rounded-xl mt-6 shadow-lg">Guardar Plato</button>
+                                 <button type="submit" className="w-full bg-bokalia-dark text-white font-bold py-4 rounded-2xl mt-8 shadow-lg active:scale-95 transition-transform">Guardar Plato</button>
                               </form>
                            </div>
-                           <div className="lg:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                           <div className="lg:w-2/3 grid grid-cols-1 sm:grid-cols-2 gap-5">
                               {productos.map(p => (
-                                 <div key={p.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col relative group">
-                                    <div className="h-40 bg-gray-200 relative">
+                                 <div key={p.id} className="bg-white rounded-3xl shadow-elegant border border-bokalia-beige overflow-hidden flex flex-col relative group">
+                                    <div className="h-48 bg-bokalia-cream relative">
                                        <img src={p.imagen_url} className="w-full h-full object-cover"/>
-                                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                          <button onClick={() => borrarProducto(p.id)} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-black shadow-lg">🗑️ Eliminar</button>
+                                       <div className="absolute inset-0 bg-bokalia-dark/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
+                                          <button onClick={() => borrarProducto(p.id)} className="bg-white text-red-500 px-6 py-3 rounded-xl font-bold shadow-lg active:scale-95">Eliminar Plato</button>
                                        </div>
                                     </div>
-                                    <div className="p-4 flex flex-col flex-grow">
+                                    <div className="p-5 flex flex-col flex-grow">
                                        <div className="flex justify-between items-start mb-2">
-                                          <h4 className="font-black text-gray-800 leading-tight pr-2 text-lg">{p.nombre}</h4>
-                                          <span className="bg-gray-100 text-gray-500 text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest">{p.categoria}</span>
+                                          <h4 className="font-bold text-bokalia-dark leading-tight pr-2 text-lg">{p.nombre}</h4>
+                                          <span className="bg-bokalia-cream text-gray-500 text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-widest border border-bokalia-beige">{p.categoria}</span>
                                        </div>
-                                       <p className="text-gray-500 text-xs font-medium mb-4 line-clamp-2">{p.descripcion || 'Sin descripción'}</p>
-                                       <p className="text-2xl font-black text-green-600 mt-auto">{p.precio}€</p>
+                                       <p className="text-gray-500 text-sm font-medium mb-6 line-clamp-2 leading-relaxed">{p.descripcion || 'Sin descripción'}</p>
+                                       <p className="text-2xl font-black text-bokalia-coral mt-auto">{p.precio}€</p>
                                     </div>
                                  </div>
                               ))}
@@ -382,42 +461,42 @@
                      {subVista === 'recompensas' && (
                         <div className="flex flex-col lg:flex-row gap-8 animate-fade-in">
                            <div className="lg:w-1/3">
-                              <form onSubmit={añadirRecompensa} className="bg-white p-6 rounded-[2rem] shadow-sm border border-yellow-300 bg-yellow-50/30 sticky top-6">
-                                 <h3 className="text-xl font-black text-yellow-900 mb-6 border-b border-yellow-200 pb-4">Añadir Premio VIP</h3>
-                                 <div className="space-y-4">
+                              <form onSubmit={añadirRecompensa} className="bg-white p-8 rounded-[2.5rem] shadow-elegant border border-bokalia-beige sticky top-6">
+                                 <h3 className="text-xl font-black text-bokalia-dark mb-6 tracking-tight">Añadir Premio VIP</h3>
+                                 <div className="space-y-5">
                                     <div>
-                                       <label className="text-xs font-bold text-yellow-700 uppercase">Foto (Opcional)</label>
-                                       <div className="mt-1 flex flex-col items-center justify-center p-4 border-2 border-dashed border-yellow-300 rounded-xl bg-white mb-2">
-                                          {recImg ? <img src={recImg} className="h-32 w-full object-cover rounded-lg mb-3 shadow-sm"/> : <span className="text-3xl grayscale opacity-50 mb-2">🎁</span>}
-                                          <button type="button" onClick={() => abrirCloudinary('recompensa')} className="bg-yellow-400 text-yellow-900 text-xs font-black px-4 py-2 rounded-lg hover:bg-yellow-500 shadow-sm">{recImg ? 'Cambiar Foto' : 'Subir Imagen'}</button>
+                                       <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-2">Foto (Opcional)</label>
+                                       <div className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-bokalia-beige rounded-2xl bg-bokalia-cream mb-2">
+                                          {recImg ? <img src={recImg} className="h-32 w-full object-cover rounded-xl mb-4 shadow-sm border border-bokalia-beige"/> : <span className="text-4xl opacity-30 mb-4">🎁</span>}
+                                          <button type="button" onClick={() => abrirCloudinary('recompensa')} className="bg-white text-bokalia-dark border border-bokalia-beige text-xs font-bold px-5 py-2.5 rounded-xl shadow-sm hover:bg-gray-50">{recImg ? 'Cambiar Foto' : 'Subir Imagen'}</button>
                                        </div>
                                     </div>
-                                    <div><label className="text-xs font-bold text-yellow-700">TÍTULO DEL PREMIO</label><input type="text" required value={recTitulo} onChange={e => setRecTitulo(e.target.value)} className="w-full bg-white p-3 rounded-xl border border-yellow-200 outline-none focus:border-yellow-500" /></div>
-                                    <div><label className="text-xs font-bold text-yellow-700">COSTE EN PUNTOS</label><input type="number" required value={recCoste} onChange={e => setRecCoste(e.target.value)} className="w-full bg-white p-3 rounded-xl border border-yellow-200 outline-none focus:border-yellow-500 text-xl font-black text-yellow-900" /></div>
-                                    <div><label className="text-xs font-bold text-yellow-700">DESCRIPCIÓN</label><textarea value={recDesc} onChange={e => setRecDesc(e.target.value)} className="w-full bg-white p-3 rounded-xl border border-yellow-200 outline-none focus:border-yellow-500" rows="2"></textarea></div>
+                                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Título del Premio</label><input type="text" required value={recTitulo} onChange={e => setRecTitulo(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral font-bold" /></div>
+                                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Coste en Puntos</label><input type="number" required value={recCoste} onChange={e => setRecCoste(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral font-black text-bokalia-coral text-xl" /></div>
+                                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Descripción</label><textarea value={recDesc} onChange={e => setRecDesc(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral resize-none" rows="2"></textarea></div>
                                  </div>
-                                 <button type="submit" className="w-full bg-yellow-400 text-yellow-900 font-black py-4 rounded-xl mt-6 shadow-lg shadow-yellow-200">Guardar Premio</button>
+                                 <button type="submit" className="w-full bg-bokalia-coral text-white font-bold py-4 rounded-2xl mt-8 shadow-lg shadow-bokalia-coral/30 active:scale-95 transition-transform">Guardar Premio</button>
                               </form>
                            </div>
                            <div className="lg:w-2/3">
                               {recompensas.length === 0 ? (
-                                 <div className="bg-white rounded-3xl p-10 text-center border-2 border-dashed border-gray-200"><div className="text-6xl mb-4 grayscale opacity-50">💎</div><h3 className="text-xl font-black text-gray-500">Sin recompensas creadas</h3></div>
+                                 <div className="bg-white rounded-[2.5rem] p-12 text-center border border-bokalia-beige shadow-sm"><div className="text-6xl mb-4 opacity-50">💎</div><h3 className="text-xl font-bold text-bokalia-dark">Sin premios creados</h3></div>
                               ) : (
-                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                     {recompensas.map(r => (
-                                       <div key={r.id} className="bg-gradient-to-br from-gray-900 to-black rounded-2xl shadow-xl border border-gray-800 overflow-hidden flex flex-col relative group text-white">
-                                          <div className="h-32 bg-gray-800 relative">
-                                             <img src={r.imagen_url} className="w-full h-full object-cover opacity-80 mix-blend-overlay"/>
-                                             <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10">
-                                                <button onClick={() => borrarRecompensa(r.id)} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl font-black shadow-lg">🗑️ Eliminar</button>
+                                       <div key={r.id} className="bg-white rounded-3xl shadow-elegant border border-bokalia-beige overflow-hidden flex flex-col relative group">
+                                          <div className="h-40 bg-bokalia-cream relative">
+                                             <img src={r.imagen_url} className="w-full h-full object-cover"/>
+                                             <div className="absolute inset-0 bg-bokalia-dark/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm z-10">
+                                                <button onClick={() => borrarRecompensa(r.id)} className="bg-white text-red-500 px-6 py-3 rounded-xl font-bold shadow-lg active:scale-95">Eliminar</button>
                                              </div>
                                           </div>
-                                          <div className="p-5 flex flex-col flex-grow relative z-0">
-                                             <h4 className="font-black text-yellow-400 leading-tight text-xl mb-1">{r.titulo}</h4>
-                                             <p className="text-gray-400 text-xs font-medium mb-4 line-clamp-2">{r.descripcion || 'Sin condiciones específicas.'}</p>
-                                             <div className="mt-auto flex justify-between items-end border-t border-gray-800 pt-3">
-                                                <span className="text-[10px] uppercase font-bold text-gray-500 tracking-widest">Coste VIP</span>
-                                                <span className="text-2xl font-black text-white">{r.coste_puntos} <span className="text-sm text-yellow-400">pts</span></span>
+                                          <div className="p-5 flex flex-col flex-grow">
+                                             <h4 className="font-bold text-bokalia-dark leading-tight text-lg mb-2">{r.titulo}</h4>
+                                             <p className="text-gray-500 text-sm font-medium mb-6 line-clamp-2 leading-relaxed">{r.descripcion || 'Sin condiciones.'}</p>
+                                             <div className="mt-auto flex justify-between items-end border-t border-bokalia-beige pt-4">
+                                                <span className="text-[10px] uppercase font-bold text-gray-400 tracking-widest">Coste VIP</span>
+                                                <span className="text-2xl font-black text-bokalia-coral">{r.coste_puntos} <span className="text-sm">pts</span></span>
                                              </div>
                                           </div>
                                        </div>
@@ -431,37 +510,37 @@
                      {subVista === 'niveles' && (
                         <div className="flex flex-col lg:flex-row gap-8 animate-fade-in">
                            <div className="lg:w-1/3">
-                              <form onSubmit={añadirNivel} className="bg-white p-6 rounded-[2rem] shadow-sm border border-purple-200 bg-purple-50/50 sticky top-6">
-                                 <h3 className="text-xl font-black text-purple-900 mb-6 border-b border-purple-200 pb-4">Nuevo Rango VIP</h3>
-                                 <div className="space-y-4">
-                                    <div><label className="text-xs font-bold text-purple-700">NOMBRE DEL NIVEL</label><input type="text" required value={nivNombre} onChange={e => setNivNombre(e.target.value)} placeholder="Ej: Oro, Leyenda..." className="w-full bg-white p-3 rounded-xl border border-purple-200 outline-none focus:border-purple-500" /></div>
-                                    <div><label className="text-xs font-bold text-purple-700">PUNTOS NECESARIOS (Desde)</label><input type="number" required value={nivPuntos} onChange={e => setNivPuntos(e.target.value)} placeholder="Ej: 1000" className="w-full bg-white p-3 rounded-xl border border-purple-200 outline-none focus:border-purple-500" /></div>
+                              <form onSubmit={añadirNivel} className="bg-white p-8 rounded-[2.5rem] shadow-elegant border border-bokalia-beige sticky top-6">
+                                 <h3 className="text-xl font-black text-bokalia-dark mb-6 tracking-tight">Nuevo Rango VIP</h3>
+                                 <div className="space-y-5">
+                                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Nombre del Rango</label><input type="text" required value={nivNombre} onChange={e => setNivNombre(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral font-bold" /></div>
+                                    <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Puntos Mínimos</label><input type="number" required value={nivPuntos} onChange={e => setNivPuntos(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral font-bold" /></div>
                                     <div>
-                                       <label className="text-xs font-bold text-purple-700 mb-1 block">COLOR IDENTIFICATIVO</label>
-                                       <div className="flex items-center gap-3 bg-white p-3 rounded-xl border border-purple-200">
-                                          <input type="color" value={nivColor} onChange={e => setNivColor(e.target.value)} className="w-10 h-10 rounded cursor-pointer border-0 p-0" />
-                                          <span className="font-mono text-sm text-purple-600">{nivColor}</span>
+                                       <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-2">Color Identificativo</label>
+                                       <div className="flex items-center gap-4 bg-bokalia-cream p-3 rounded-2xl border border-bokalia-beige">
+                                          <input type="color" value={nivColor} onChange={e => setNivColor(e.target.value)} className="w-12 h-12 rounded-xl cursor-pointer border-0 p-0 shadow-sm" />
+                                          <span className="font-mono text-sm font-bold text-gray-600">{nivColor}</span>
                                        </div>
                                     </div>
                                  </div>
-                                 <button type="submit" className="w-full bg-purple-600 text-white font-black py-4 rounded-xl mt-6 shadow-lg shadow-purple-300">Añadir Nivel</button>
+                                 <button type="submit" className="w-full bg-bokalia-dark text-white font-bold py-4 rounded-2xl mt-8 shadow-lg active:scale-95 transition-transform">Crear Rango</button>
                               </form>
                            </div>
                            <div className="lg:w-2/3">
                               {niveles.length === 0 ? (
-                                 <div className="bg-white rounded-3xl p-10 text-center border-2 border-dashed border-gray-200"><div className="text-6xl mb-4 grayscale opacity-50">⭐</div><h3 className="text-xl font-black text-gray-500">Sin rangos VIP definidos</h3></div>
+                                 <div className="bg-white rounded-[2.5rem] p-12 text-center border border-bokalia-beige shadow-sm"><div className="text-6xl mb-4 opacity-50">⭐</div><h3 className="text-xl font-bold text-bokalia-dark">Sin rangos definidos</h3></div>
                               ) : (
                                  <div className="space-y-4">
                                     {niveles.map((n, idx) => (
-                                       <div key={n.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center group">
-                                          <div className="flex items-center gap-4">
-                                             <div className="w-12 h-12 rounded-xl shadow-inner flex items-center justify-center font-black text-white text-xl" style={{ backgroundColor: n.color }}>{idx + 1}</div>
+                                       <div key={n.id} className="bg-white p-6 rounded-[2rem] shadow-elegant border border-bokalia-beige flex justify-between items-center group">
+                                          <div className="flex items-center gap-5">
+                                             <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-white text-2xl shadow-md" style={{ backgroundColor: n.color }}>{idx + 1}</div>
                                              <div>
-                                                <h4 className="font-black text-gray-900 text-xl">{n.nombre}</h4>
-                                                <p className="text-sm font-bold text-gray-500">Desde <span className="text-purple-600">{n.puntos_minimos} pts</span></p>
+                                                <h4 className="font-black text-bokalia-dark text-xl">{n.nombre}</h4>
+                                                <p className="text-sm font-medium text-gray-500 mt-1">Desde <span className="font-bold" style={{ color: n.color }}>{n.puntos_minimos} pts</span></p>
                                              </div>
                                           </div>
-                                          <button onClick={() => borrarNivel(n.id)} className="bg-red-50 text-red-600 font-black px-4 py-2 rounded-xl hover:bg-red-600 hover:text-white transition-colors">Eliminar</button>
+                                          <button onClick={() => borrarNivel(n.id)} className="bg-gray-50 text-gray-400 font-bold px-5 py-3 rounded-xl hover:bg-red-50 hover:text-red-500 transition-colors border border-gray-100">Eliminar</button>
                                        </div>
                                     ))}
                                  </div>
@@ -472,46 +551,46 @@
                   </div>
                )}
 
-               {/* ======================= VISTA NOTIFICACIONES ======================= */}
+               {/* ======================= VISTA NOTIFICACIONES PUSH ======================= */}
                {vista === 'notificaciones' && (
                   <div className="max-w-5xl mx-auto animate-fade-in">
-                     <h2 className="text-4xl font-black text-gray-900 mb-2">Centro de Avisos</h2>
-                     <p className="text-gray-500 font-medium mb-8">Envía notificaciones en tiempo real a tus clientes. <b>El historial se limpia cada 24h.</b></p>
+                     <h2 className="text-4xl font-black text-bokalia-dark mb-3 tracking-tight">Centro de Avisos</h2>
+                     <p className="text-gray-500 font-medium mb-10">Envía notificaciones push a tus clientes. <b className="text-bokalia-coral">El historial se limpia cada 24h.</b></p>
 
                      <div className="flex flex-col lg:flex-row gap-8">
                         <div className="lg:w-1/3">
-                           <form onSubmit={enviarNotificacion} className="bg-white p-6 rounded-[2rem] shadow-sm border border-blue-200 sticky top-6">
-                              <h3 className="text-xl font-black text-blue-900 mb-6 border-b border-blue-100 pb-4">Redactar Mensaje</h3>
-                              <div className="space-y-4">
+                           <form onSubmit={enviarNotificacion} className="bg-white p-8 rounded-[2.5rem] shadow-elegant border border-bokalia-beige sticky top-6">
+                              <h3 className="text-xl font-black text-bokalia-dark mb-6 tracking-tight">Nuevo Aviso</h3>
+                              <div className="space-y-5">
                                  <div>
-                                    <label className="text-xs font-bold text-blue-700">DESTINATARIOS</label>
-                                    <select value={notiDestino} onChange={e => setNotiDestino(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border border-gray-200 outline-none focus:border-blue-500 font-bold text-gray-800">
-                                       <option value="global">🌍 TODOS LOS USUARIOS (Global)</option>
+                                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Destinatarios</label>
+                                    <select value={notiDestino} onChange={e => setNotiDestino(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral font-bold text-bokalia-dark text-sm">
+                                       <option value="global">🌍 A TODA LA APP (Global)</option>
                                        <optgroup label="📍 Solo clientes de un local:">
                                           {restaurantes.map(r => <option key={r.id} value={r.id}>{r.nombre}</option>)}
                                        </optgroup>
                                     </select>
                                  </div>
-                                 <div><label className="text-xs font-bold text-blue-700">TÍTULO</label><input type="text" required maxLength="50" value={notiTitulo} onChange={e => setNotiTitulo(e.target.value)} placeholder="Ej: ¡2x1 en Cenas hoy!" className="w-full bg-white p-3 rounded-xl border border-gray-200 outline-none focus:border-blue-500" /></div>
-                                 <div><label className="text-xs font-bold text-blue-700">MENSAJE</label><textarea required maxLength="150" value={notiMensaje} onChange={e => setNotiMensaje(e.target.value)} placeholder="Escribe tu promoción..." rows="3" className="w-full bg-white p-3 rounded-xl border border-gray-200 outline-none focus:border-blue-500 resize-none"></textarea></div>
+                                 <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Título</label><input type="text" required maxLength="50" value={notiTitulo} onChange={e => setNotiTitulo(e.target.value)} className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral font-bold" /></div>
+                                 <div><label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Mensaje Corto</label><textarea required maxLength="150" value={notiMensaje} onChange={e => setNotiMensaje(e.target.value)} rows="3" className="w-full bg-bokalia-cream p-4 rounded-xl border border-bokalia-beige outline-none focus:border-bokalia-coral resize-none font-medium text-sm"></textarea></div>
                               </div>
-                              <button type="submit" className="w-full bg-blue-600 text-white font-black py-4 rounded-xl mt-6 shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-transform">🚀 Enviar Aviso</button>
+                              <button type="submit" className="w-full bg-bokalia-coral text-white font-bold py-4 rounded-2xl mt-8 shadow-lg shadow-bokalia-coral/30 active:scale-95 transition-transform">🚀 Enviar Aviso</button>
                            </form>
                         </div>
                         <div className="lg:w-2/3">
-                           <h3 className="text-xl font-black text-gray-800 mb-4">Avisos Activos (Últimas 24h)</h3>
+                           <h3 className="text-xl font-bold text-bokalia-dark mb-6">Enviados (Últimas 24h)</h3>
                            {notificaciones.length === 0 ? (
-                              <div className="bg-white rounded-3xl p-10 text-center border-2 border-dashed border-gray-200"><div className="text-5xl mb-4 grayscale opacity-50">📭</div><p className="font-bold text-gray-500">No hay notificaciones recientes.</p></div>
+                              <div className="bg-white rounded-[2.5rem] p-12 text-center border border-bokalia-beige shadow-sm"><div className="text-5xl mb-4 opacity-50">📭</div><p className="font-bold text-gray-500">No hay notificaciones recientes.</p></div>
                            ) : (
                               <div className="space-y-4">
                                  {notificaciones.map(noti => (
-                                    <div key={noti.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex flex-col relative overflow-hidden">
-                                       <div className={`absolute top-0 left-0 w-2 h-full ${noti.es_global ? 'bg-green-500' : 'bg-blue-500'}`}></div>
-                                       <div className="pl-4 flex justify-between items-start mb-2">
-                                          <h4 className="font-black text-gray-900 text-lg">{noti.titulo}</h4>
-                                          <span className={`text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest ${noti.es_global ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>{noti.es_global ? '🌍 GLOBAL' : `📍 ${noti.restaurante?.nombre}`}</span>
+                                    <div key={noti.id} className="bg-white p-6 rounded-[2rem] shadow-elegant border border-bokalia-beige flex flex-col relative overflow-hidden">
+                                       <div className={`absolute top-0 left-0 w-2 h-full ${noti.es_global ? 'bg-bokalia-coral' : 'bg-bokalia-dark'}`}></div>
+                                       <div className="pl-4 flex justify-between items-start mb-3">
+                                          <h4 className="font-bold text-bokalia-dark text-lg">{noti.titulo}</h4>
+                                          <span className={`text-[10px] font-bold px-3 py-1.5 rounded-lg uppercase tracking-widest ${noti.es_global ? 'bg-bokalia-coral/10 text-bokalia-coral' : 'bg-gray-100 text-gray-600'}`}>{noti.es_global ? '🌍 GLOBAL' : `📍 ${noti.restaurante?.nombre}`}</span>
                                        </div>
-                                       <p className="pl-4 text-gray-600 text-sm mb-3">{noti.mensaje}</p>
+                                       <p className="pl-4 text-gray-500 font-medium text-sm mb-4 leading-relaxed">{noti.mensaje}</p>
                                        <p className="pl-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Enviado a las {formatDate(noti.creado_en)}</p>
                                     </div>
                                  ))}
