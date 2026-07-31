@@ -87,6 +87,7 @@
     );
 
     function MainApp() {
+      // ESTADOS EXACTAMENTE IGUALES AL CÓDIGO ORIGINAL
       const [mesaParam, setMesaParam] = useState(null);
       const [user, setUser] = useState(null);
       const [authLoading, setAuthLoading] = useState(true);
@@ -107,13 +108,14 @@
       
       const [showModoMesa, setShowModoMesa] = useState(false);
       const [showJoinPrompt, setShowJoinPrompt] = useState(false);
+      const [showReviewModal, setShowReviewModal] = useState(false);
+      const [showTicketModal, setShowTicketModal] = useState(false);
       
-      // 🔥 ESTADO DE EXPULSIÓN INMEDIATA (Solo bloquea UI con el tutorial)
-      const [fuerzaTutorial, setFuerzaTutorial] = useState(false);
+      const [datosTicket, setDatosTicket] = useState({ subtotal: 0, puntosGanados: 0, items: [] });
       const [toastMsg, setToastMsg] = useState('');
 
       const channelRef = useRef(null);
-      const expulsionRef = useRef(false);
+      const ticketProcesadoRef = useRef(false);
 
       useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -159,10 +161,10 @@
                cargarRondasMesa(sesionActiva.id);
             })
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'sesiones_mesa', filter: `id=eq.${sesionActiva.id}` }, async (payload) => {
+               // 🔥 EL SABUESO ORIGINAL (Funciona perfecto)
                const { data: checkMesa } = await supabase.from('sesiones_mesa').select('estado').eq('id', sesionActiva.id).single();
-               // 🔥 SABUESO: Detecta el pago y lanza la expulsión al instante.
                if (checkMesa && checkMesa.estado === 'pagada') {
-                  procesarSalidaAPerfil();
+                  cargarTicketFinal(sesionActiva.id);
                }
             })
             .subscribe();
@@ -197,16 +199,10 @@
         if (data) setProductos(data);
       };
 
-      // 🔥 VIGILANTE DE MESA INTELIGENTE (100% FUNCIONAL Y PERMITE RECARGAR)
+      // 🔥 LÓGICA VIGILANTE ORIGINAL Y ESTABLE 🔥
       const verificarSesionMesa = async () => {
-        if (expulsionRef.current) return;
-
         const { data } = await supabase.from('sesiones_mesa')
-          .select('*, host:usuarios(nombre, email)')
-          .eq('num_mesa', mesaParam)
-          .eq('restaurante_id', RESTAURANTE_ID)
-          .neq('estado', 'pagada')
-          .maybeSingle();
+          .select('*, host:usuarios(nombre, email)').eq('num_mesa', mesaParam).eq('restaurante_id', RESTAURANTE_ID).neq('estado', 'pagada').maybeSingle();
         
         if (data) {
           if (!user || data.host_id !== user?.id) {
@@ -225,28 +221,8 @@
             setMesaBloqueada(false); setShowJoinPrompt(false); setSesionActiva(data);
           }
         } else {
-          // NO HAY SESIÓN ACTIVA EN ESTA MESA.
-          // ¿Nosotros teníamos una sesión hace 1 milisegundo? Si es así, significa que el camarero nos la acaba de cerrar.
-          if (sesionActiva) {
-             procesarSalidaAPerfil();
-          } else {
-             // Entramos de cero (recargando o escaneando de nuevo), así que mesa libre para empezar a pedir.
-             setSesionActiva(null); setMesaBloqueada(false); setShowJoinPrompt(false);
-          }
+          setSesionActiva(null); setMesaBloqueada(false); setShowJoinPrompt(false);
         }
-      };
-
-      // 🔥 TIRÓN Y TUTORIAL 🔥
-      const procesarSalidaAPerfil = () => {
-         if (expulsionRef.current) return;
-         expulsionRef.current = true;
-
-         const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-         if (!isStandalone) {
-            setFuerzaTutorial(true); 
-         } else {
-            window.location.href = 'perfil.html'; 
-         }
       };
 
       const aceptarUnirse = () => {
@@ -352,6 +328,41 @@
         mostrarToast("El camarero trae la cuenta. ¡Avisado! 💸");
       };
 
+      // 🔥 CARGA ORIGINAL DEL TICKET (Funciona perfecto)
+      const cargarTicketFinal = async (idSesion) => {
+         if (ticketProcesadoRef.current) return;
+         ticketProcesadoRef.current = true;
+
+         try {
+            if (!user) return finalizarYSalir();
+
+            const { data: misRondas } = await supabase.from('pedidos_rondas').select('id').eq('sesion_id', idSesion).eq('usuario_id', user.id).in('estado', ['enviado', 'preparando', 'servido']);
+            let totalGastado = 0;
+            let misItems = [];
+            
+            if (misRondas && misRondas.length > 0) {
+               const rondasIds = misRondas.map(r => r.id);
+               const { data: items } = await supabase.from('items_pedido').select('cantidad, precio_unitario, producto:productos(nombre)').in('ronda_id', rondasIds);
+               if (items) {
+                  misItems = items;
+                  items.forEach(i => { totalGastado += (parseFloat(i.precio_unitario || 0) * parseInt(i.cantidad || 1)); });
+               }
+            }
+            
+            const puntosGanadosVisuales = Math.floor(totalGastado * 100);
+            setDatosTicket({ subtotal: totalGastado, puntosGanados: puntosGanadosVisuales, items: misItems });
+            setShowTicketModal(true);
+         } catch (e) {
+            console.error(e);
+            setShowReviewModal(true); 
+         }
+      };
+
+      // 🔥 LA SALIDA DIRECTA ORIGINAL
+      const finalizarYSalir = () => {
+         window.location.href = 'perfil.html'; 
+      };
+
       const formatMoney = (num) => Number(num).toFixed(2);
       const formatDate = (dateStr) => {
         const d = new Date(dateStr);
@@ -360,9 +371,8 @@
       
       const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
 
-
       // ==========================================
-      // UI Y VISTAS
+      // UI Y VISTAS (DISEÑO BOKALIA APLICADO)
       // ==========================================
 
       if (authLoading) return (
@@ -409,31 +419,12 @@
       return (
         <div className="pb-36 min-h-screen relative flex flex-col">
           
-          {/* 🔥 TOAST RECTO Y PERFECTO (ESTILO ORIGINAL) 🔥 */}
+          {/* 🔥 TOAST ESTILO ORIGINAL, PERO QUE NO BLOQUEA CLICKS 🔥 */}
           {toastMsg && (
-            <div className="fixed top-24 left-1/2 transform -translate-x-1/2 z-[60] pointer-events-none animate-fade-in w-[90%] max-w-sm flex justify-center">
+            <div className="fixed top-24 left-1/2 transform -translate-x-1/2 z-[60] w-11/12 max-w-sm pointer-events-none animate-fade-in flex justify-center">
               <div className="bg-bokalia-dark text-white font-bold px-6 py-4 rounded-2xl shadow-elegant-lg text-center w-full">
-                {toastMsg}
+                <span>{toastMsg}</span>
               </div>
-            </div>
-          )}
-
-          {/* 🔥 PANTALLA TUTORIAL Y EXPULSIÓN INYECTADA COMO MODAL 🔥 */}
-          {fuerzaTutorial && (
-            <div className="fixed inset-0 bg-bokalia-dark/80 backdrop-blur-md z-[999] flex items-center justify-center p-4 animate-fade-in">
-               <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 text-center shadow-2xl relative border-t-8 border-bokalia-coral">
-                  <div className="text-5xl mb-4 mt-2">📲</div>
-                  <h3 className="text-2xl font-black text-bokalia-dark mb-2 tracking-tight">Mesa Pagada</h3>
-                  <p className="text-gray-500 font-medium mb-8 text-sm">Instálanos en tu inicio y no pierdas tus puntos VIP.</p>
-                  <div className="bg-bokalia-cream p-5 rounded-2xl text-left text-sm font-medium text-bokalia-dark space-y-4 mb-8 border border-bokalia-beige">
-                     <p className="flex items-start gap-3"><span className="text-xl">1️⃣</span> <span className="mt-1">Toca <b>Compartir</b> en Safari o <b>3 puntitos</b>.</span></p>
-                     <p className="flex items-center gap-3"><span className="text-xl">2️⃣</span> <span>Desliza hacia abajo.</span></p>
-                     <p className="flex items-start gap-3"><span className="text-xl">3️⃣</span> <span className="mt-1">Toca <b>Añadir a pantalla de inicio</b> ➕.</span></p>
-                  </div>
-                  <button onClick={() => window.location.href='perfil.html'} className="w-full bg-bokalia-coral text-white font-bold py-4 rounded-2xl text-lg active:scale-95 transition-transform shadow-lg shadow-bokalia-coral/30">
-                     Entendido, ir a mi perfil
-                  </button>
-               </div>
             </div>
           )}
 
@@ -572,7 +563,7 @@
             </div>
           )}
 
-          {/* MODALES ABSOLUTES */}
+          {/* 🔥 MODALES ORIGINALES 🔥 */}
           {showAuthModal && (
             <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
               <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up border border-bokalia-beige">
@@ -606,6 +597,61 @@
                     <span className="text-[10px] font-medium text-gray-400 mt-1 uppercase tracking-widest text-center leading-tight">Mesa exclusiva. Tú pagas todo<br/>y te llevas todos los puntos.</span>
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* 🧾 TICKET FINAL ORIGINAL */}
+          {showTicketModal && (
+            <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[120] flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center shadow-2xl animate-slide-up border border-bokalia-beige">
+                <div className="text-5xl mb-4">🧾</div>
+                <h3 className="text-2xl font-black text-bokalia-dark mb-2 tracking-tight">¡Cuenta Pagada!</h3>
+                <p className="text-gray-500 font-medium text-sm mb-6">Gracias por comer con nosotros.</p>
+                
+                <div className="bg-bokalia-cream p-5 rounded-2xl mb-6 text-left border border-bokalia-beige max-h-48 overflow-y-auto">
+                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 border-b border-bokalia-beige pb-2">Tu parte de la cuenta</p>
+                   {datosTicket.items.length === 0 ? <p className="text-sm font-medium text-gray-400 py-2">No tienes consumos propios.</p> : null}
+                   {datosTicket.items.map((it, i) => (
+                      <div key={i} className="flex justify-between text-sm font-medium text-bokalia-dark mb-2">
+                         <span>{it.cantidad}x {it.producto?.nombre}</span>
+                         <span className="font-bold">{(parseFloat(it.precio_unitario) * parseInt(it.cantidad)).toFixed(2)}€</span>
+                      </div>
+                   ))}
+                   <div className="flex justify-between items-end mt-4 pt-3 border-t border-bokalia-beige">
+                      <span className="text-gray-500 font-bold uppercase text-[10px] tracking-widest">Total Pagado</span>
+                      <span className="text-xl font-black text-bokalia-coral">{datosTicket.subtotal.toFixed(2)}€</span>
+                   </div>
+                </div>
+
+                <div className="bg-white border-2 border-bokalia-beige text-bokalia-dark p-5 rounded-2xl mb-8 shadow-sm">
+                   <p className="font-black text-lg text-bokalia-coral">+{datosTicket.puntosGanados} Puntos VIP 👑</p>
+                   <p className="text-[11px] font-medium text-gray-500 mt-1 uppercase tracking-widest">Se han sumado a tu Wallet</p>
+                </div>
+
+                <button onClick={() => {
+                   setShowTicketModal(false);
+                   setShowReviewModal(true);
+                }} className="w-full bg-bokalia-coral text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-transform">
+                   Continuar
+                </button>
+              </div>
+            </div>
+          )}
+          
+          {/* ⭐ ESTRELLITAS ORIGINALES */}
+          {showReviewModal && (
+            <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[130] flex items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-md text-center animate-slide-up border border-bokalia-beige">
+                <div className="text-5xl mb-4 mt-4">⭐</div>
+                <h3 className="text-2xl font-black text-bokalia-dark mb-2 tracking-tight">¿Qué tal la comida?</h3>
+                <p className="text-sm text-gray-500 mb-8 font-medium">Toca las estrellas para valorarnos.</p>
+                <div className="flex justify-center gap-3 mb-10">
+                  {[1,2,3,4,5].map(star => (
+                    <button key={star} onClick={finalizarYSalir} className="text-5xl text-yellow-400 active:scale-75 transition-transform drop-shadow-sm">★</button>
+                  ))}
+                </div>
+                <button onClick={finalizarYSalir} className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pb-2">Saltar y Salir</button>
               </div>
             </div>
           )}
