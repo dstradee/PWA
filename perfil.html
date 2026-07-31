@@ -6,13 +6,39 @@
   <title>Mi Perfil - Bokalia</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 🔥 CONFIGURACIÓN TAILWIND PARA LA MARCA BOKALIA 🔥 -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bokalia: {
+              coral: '#e25e4c',  /* Terracota/Coral corporativo */
+              cream: '#fdfbf7',  /* Crema muy claro para fondos */
+              beige: '#f4ede5',  /* Beige suave para bordes/zonas secundarias */
+              dark: '#302b28'    /* Gris muy oscuro/cálido para textos */
+            }
+          },
+          boxShadow: {
+            'elegant': '0 8px 30px rgba(0, 0, 0, 0.04)',
+            'elegant-lg': '0 15px 40px rgba(0, 0, 0, 0.06)',
+          }
+        }
+      }
+    }
+  </script>
+
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
+  <!-- Fuente más elegante y moderna -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
   <style>
-    body { font-family: system-ui, sans-serif; background: #111827; margin: 0; -webkit-tap-highlight-color: transparent; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #f4ede5; margin: 0; -webkit-tap-highlight-color: transparent; }
     @keyframes slideUp { from { transform: translate3d(0, 100%, 0); } to { transform: translate3d(0, 0, 0); } }
     .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     @keyframes fadeIn { from { opacity: 0; transform: translate3d(0, -10px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
@@ -20,29 +46,35 @@
     .mobile-container { transform: translate(0); }
     .custom-scrollbar::-webkit-scrollbar { height: 0px; display: none; }
     .custom-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    
+    /* Textura muy sutil para el fondo */
+    .bg-texture {
+       background-color: #fdfbf7;
+       background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23e25e4c' fill-opacity='0.02' fill-rule='evenodd'%3E%3Ccircle cx='3' cy='3' r='1'/%3E%3Ccircle cx='13' cy='13' r='1'/%3E%3C/g%3E%3C/svg%3E");
+    }
   </style>
 </head>
-<body class="flex justify-center min-h-screen bg-gray-900">
+<body class="flex justify-center min-h-screen">
   
-  <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container pb-10">
-    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; color:#dc2626;">
+  <div id="root" class="w-full max-w-md bg-texture min-h-screen relative overflow-x-hidden shadow-2xl mobile-container pb-10">
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; color:#e25e4c;">
       <h1 style="font-size:3rem; font-weight:900;">BOKALIA</h1>
     </div>
   </div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
 
     class ErrorBoundary extends React.Component {
       constructor(props) { super(props); this.state = { hasError: false, error: null }; }
       static getDerivedStateFromError(error) { return { hasError: true, error }; }
       render() {
         if (this.state.hasError) return (
-            <div className="p-8 flex flex-col items-center justify-center min-h-screen bg-red-50 text-center">
+            <div className="p-8 flex flex-col items-center justify-center min-h-screen bg-bokalia-cream text-center">
               <div className="text-6xl mb-4">🚨</div>
-              <h1 className="text-2xl font-black text-red-600 mb-2">Error Crítico</h1>
-              <p className="text-gray-700 text-sm mb-6">{this.state.error.toString()}</p>
-              <button onClick={() => window.location.reload()} className="bg-red-600 text-white font-bold py-3 px-6 rounded-xl">Recargar App</button>
+              <h1 className="text-2xl font-black text-bokalia-coral mb-2">Error Crítico</h1>
+              <p className="text-bokalia-dark text-sm mb-6">{this.state.error.toString()}</p>
+              <button onClick={() => window.location.reload()} className="bg-bokalia-coral text-white font-bold py-3 px-6 rounded-xl">Recargar App</button>
             </div>
         );
         return this.props.children;
@@ -59,15 +91,13 @@
       const [vistaActual, setVistaActual] = useState('inicio'); 
       const [loading, setLoading] = useState(true);
       const [user, setUser] = useState(null);
-      const [userProfile, setUserProfile] = useState(null);
       
       const [wallets, setWallets] = useState([]); 
       const [historial, setHistorial] = useState([]);
       const [sugerencias, setSugerencias] = useState([]); 
       
-      // 🔥 NUEVO ESTADO: RECOMPENSAS
       const [recompensas, setRecompensas] = useState([]);
-      const [modalPremios, setModalPremios] = useState(null); // Guardará la wallet activa si se abre el modal
+      const [modalPremios, setModalPremios] = useState(null); 
       
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('login'); 
@@ -77,9 +107,17 @@
       const [showInstallTutorial, setShowInstallTutorial] = useState(false);
       const [toastMsg, setToastMsg] = useState('');
 
+      // 🔥 NUEVOS ESTADOS
+      const [notificacionActiva, setNotificacionActiva] = useState(null);
+      const [modalErrorCanjeo, setModalErrorCanjeo] = useState(false);
+      const walletsRef = useRef([]);
+
+      useEffect(() => {
+        walletsRef.current = wallets;
+      }, [wallets]);
+
       useEffect(() => {
         const safeTimer = setTimeout(() => { setLoading(false); }, 2500);
-
         cargarSugerencias();
 
         supabase.auth.getSession().then(({ data }) => {
@@ -89,10 +127,27 @@
 
         const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
           if (session?.user) procesarUsuario(session.user);
-          else { setUser(null); setUserProfile(null); setWallets([]); setHistorial([]); setRecompensas([]); setLoading(false); }
+          else { setUser(null); setWallets([]); setHistorial([]); setRecompensas([]); setLoading(false); }
         });
 
-        return () => { clearTimeout(safeTimer); if (authListener?.subscription) authListener.subscription.unsubscribe(); };
+        // 🔥 OÍDO BIONICO DE NOTIFICACIONES PUSH (TIEMPO REAL) 🔥
+        const canalNotis = supabase.channel('notificaciones_push')
+           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notificaciones' }, payload => {
+              const noti = payload.new;
+              if (noti.es_global) {
+                 setNotificacionActiva(noti); // Es global, la mostramos a todos
+              } else if (noti.restaurante_id) {
+                 // Si es de un local, comprobamos si el usuario tiene wallet ahí
+                 const tieneWallet = walletsRef.current.some(w => w.restaurante?.id === noti.restaurante_id);
+                 if (tieneWallet) setNotificacionActiva(noti);
+              }
+           }).subscribe();
+
+        return () => { 
+           clearTimeout(safeTimer); 
+           if (authListener?.subscription) authListener.subscription.unsubscribe(); 
+           supabase.removeChannel(canalNotis);
+        };
       }, []);
 
       const cargarSugerencias = async () => {
@@ -106,9 +161,7 @@
         setUser(authUser);
         try {
           let { data: perfil } = await supabase.from('usuarios').select('id').eq('id', authUser.id).maybeSingle();
-          if (!perfil) {
-             await supabase.from('usuarios').insert([{ id: authUser.id, email: authUser.email }]);
-          }
+          if (!perfil) await supabase.from('usuarios').insert([{ id: authUser.id, email: authUser.email }]);
 
           const { data: misPuntos } = await supabase.from('puntos_fidelizacion')
             .select('puntos, restaurante:restaurantes(id, nombre, color_tema)')
@@ -116,8 +169,6 @@
             
           if (misPuntos) {
              setWallets(misPuntos);
-             
-             // 🔥 NUEVO: OBTENER RECOMPENSAS DE MIS RESTAURANTES
              const restIds = misPuntos.map(w => w.restaurante?.id).filter(Boolean);
              if (restIds.length > 0) {
                 const { data: recs } = await supabase.from('recompensas')
@@ -128,14 +179,12 @@
 
           const seisMesesAtras = new Date();
           seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
-          
           const { data: dataHistorial } = await supabase.from('pedidos_rondas')
             .select('id, fecha, estado, sesion:sesiones_mesa!inner(estado, restaurante:restaurantes(nombre, color_tema)), items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
             .eq('usuario_id', authUser.id).eq('oculto_usuario', false).eq('sesiones_mesa.estado', 'pagada')
             .gte('fecha', seisMesesAtras.toISOString()).order('fecha', { ascending: false }).limit(20);
             
           if (dataHistorial) setHistorial(dataHistorial.filter(h => h.items && h.items.length > 0));
-
         } catch(e) { console.error(e); } 
         finally { setLoading(false); }
       };
@@ -164,115 +213,109 @@
 
       const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
 
+      // 🔥 MODAL CENTRADO AL CANJEAR PUNTOS 🔥
       const intentarCanjear = () => {
-         mostrarToast("⚠️ Para canjearlo, avisa a tu camarero.");
+         setModalErrorCanjeo(true);
       };
 
-      // Filtros calculados
       const walletsConPuntos = wallets.filter(w => w.puntos > 0);
       const restaurantesConPuntosIds = walletsConPuntos.map(w => w.restaurante?.id);
       const sugerenciasFiltradas = sugerencias.filter(rest => !restaurantesConPuntosIds.includes(rest.id));
 
       if (loading) {
          return (
-           <div className="h-screen flex items-center justify-center bg-yellow-50 flex-col">
-              <div className="w-16 h-16 border-8 border-red-200 border-t-red-600 rounded-full animate-spin mb-6"></div>
-              <h2 className="text-2xl font-black text-red-600 tracking-tighter animate-pulse">Cargando Wallet...</h2>
+           <div className="h-screen flex items-center justify-center flex-col">
+              <div className="w-16 h-16 border-4 border-bokalia-beige border-t-bokalia-coral rounded-full animate-spin mb-6"></div>
+              <h2 className="text-xl font-bold text-bokalia-coral tracking-tight animate-pulse">Cargando Bokalia...</h2>
            </div>
          );
       }
 
       return (
-        <div className="bg-gray-50 min-h-screen relative flex flex-col pb-10">
+        <div className="min-h-screen relative flex flex-col pb-10">
           
           {toastMsg && (
             <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-[60] animate-fade-in w-11/12 max-w-sm">
-              <div className="bg-green-500 text-white font-black px-6 py-4 rounded-2xl shadow-xl text-center">
+              <div className="bg-bokalia-dark text-white font-bold px-6 py-4 rounded-2xl shadow-elegant text-center">
                 <span>{toastMsg}</span>
               </div>
             </div>
           )}
 
-          <header className="bg-red-600 text-white p-5 shadow-md flex justify-between items-center rounded-b-3xl z-10 relative">
-            <h1 className="font-black text-3xl text-yellow-400 tracking-tighter">BOKALIA</h1>
+          {/* 🔥 CABECERA PREMIUM 🔥 */}
+          <header className="bg-white border-b border-bokalia-beige p-6 shadow-sm flex justify-between items-center rounded-b-[2rem] z-10 relative">
+            <h1 className="font-black text-3xl text-bokalia-coral tracking-tighter">BOKALIA</h1>
             {user ? (
-               <button onClick={async () => await supabase.auth.signOut()} className="text-xs font-bold bg-red-800 px-4 py-2 rounded-xl active:bg-red-900 transition-colors">Cerrar Sesión</button> 
+               <button onClick={async () => await supabase.auth.signOut()} className="text-[11px] font-bold text-gray-400 bg-gray-50 px-4 py-2 rounded-xl border border-gray-100 active:scale-95 transition-transform uppercase tracking-widest">Salir</button> 
             ) : (
-               <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-black bg-yellow-400 text-red-900 px-6 py-2 rounded-xl shadow-sm">Entrar</button>
+               <button onClick={() => { setAuthMode('login'); setShowAuthModal(true); }} className="text-sm font-bold bg-bokalia-coral text-white px-6 py-2 rounded-xl shadow-md active:scale-95 transition-transform">Entrar</button>
             )}
           </header>
 
-          <div className="bg-white flex justify-center gap-6 border-b border-gray-200 shadow-sm z-0">
-             <button onClick={() => setVistaActual('inicio')} className={`font-black py-4 px-2 border-b-4 transition-colors ${vistaActual === 'inicio' ? 'border-red-600 text-red-600' : 'border-transparent text-gray-400'}`}>Mis Wallets</button>
-             <button onClick={() => setVistaActual('historial')} className={`font-black py-4 px-2 border-b-4 transition-colors ${vistaActual === 'historial' ? 'border-red-600 text-red-600' : 'border-transparent text-gray-400'}`}>Historial</button>
-             <button onClick={() => setVistaActual('reservas')} className={`font-bold py-4 px-2 border-b-4 transition-colors ${vistaActual === 'reservas' ? 'border-red-600 text-red-600' : 'border-transparent text-gray-400'}`}>Reservas</button>
+          <div className="flex justify-center gap-6 border-b border-bokalia-beige z-0">
+             <button onClick={() => setVistaActual('inicio')} className={`font-bold py-4 px-2 border-b-2 transition-colors ${vistaActual === 'inicio' ? 'border-bokalia-coral text-bokalia-coral' : 'border-transparent text-gray-400'}`}>Mis Wallets</button>
+             <button onClick={() => setVistaActual('historial')} className={`font-bold py-4 px-2 border-b-2 transition-colors ${vistaActual === 'historial' ? 'border-bokalia-coral text-bokalia-coral' : 'border-transparent text-gray-400'}`}>Historial</button>
+             <button onClick={() => setVistaActual('reservas')} className={`font-bold py-4 px-2 border-b-2 transition-colors ${vistaActual === 'reservas' ? 'border-bokalia-coral text-bokalia-coral' : 'border-transparent text-gray-400'}`}>Reservas</button>
           </div>
 
-          <main className="flex-grow p-4 z-0 relative animate-fade-in">
+          <main className="flex-grow p-5 z-0 relative animate-fade-in">
             
             {vistaActual === 'inicio' && (
                <>
                   {!user && (
-                     <div className="relative overflow-hidden rounded-[2.5rem] p-8 shadow-xl bg-gradient-to-br from-gray-800 to-black text-white cursor-pointer mt-4" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
-                       <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center text-center p-6 backdrop-blur-sm">
-                           <div className="text-5xl mb-4">🎁</div>
-                           <h3 className="font-black text-2xl text-yellow-400 mb-2 leading-tight">Tu Bokalia Wallet</h3>
-                           <p className="text-sm font-medium text-white/90">Regístrate gratis para empezar a sumar puntos con cada comida.</p>
-                           <button className="mt-6 bg-red-600 hover:bg-red-500 px-8 py-4 rounded-full font-black shadow-lg shadow-red-600/50 w-full text-lg">Activar Cuenta</button>
-                       </div>
-                       <div className="opacity-10 blur-md pointer-events-none">
-                           <p className="text-[10px] font-bold uppercase mb-1">Bokalia Wallet Universal</p>
-                           <p className="text-5xl font-black mb-4">0 pts</p>
+                     <div className="relative overflow-hidden rounded-[2rem] p-8 shadow-elegant bg-white border border-bokalia-beige cursor-pointer mt-4" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
+                       <div className="relative z-10 flex flex-col items-center justify-center text-center">
+                           <div className="text-5xl mb-4">✨</div>
+                           <h3 className="font-black text-2xl text-bokalia-dark mb-2">Bokalia Wallet</h3>
+                           <p className="text-sm font-medium text-gray-500 mb-8">Regístrate gratis para empezar a sumar puntos con cada comida.</p>
+                           <button className="bg-bokalia-coral hover:bg-opacity-90 px-8 py-4 rounded-2xl font-bold text-white shadow-lg w-full text-lg active:scale-95 transition-transform">Activar Cuenta</button>
                        </div>
                      </div>
                   )}
 
                   {user && walletsConPuntos.length === 0 && (
-                     <div className="bg-white border-2 border-dashed border-gray-200 p-8 rounded-[2rem] text-center mt-4">
-                        <span className="text-5xl block mb-4">💳</span>
-                        <h3 className="text-xl font-black text-gray-800 mb-2">Aún no tienes puntos</h3>
+                     <div className="bg-white border border-bokalia-beige p-8 rounded-[2rem] text-center mt-4 shadow-sm">
+                        <span className="text-5xl block mb-4 opacity-70">💳</span>
+                        <h3 className="text-xl font-bold text-bokalia-dark mb-2">Aún no tienes puntos</h3>
                         <p className="text-sm text-gray-500 font-medium">Pide tu cuenta en tu próxima visita a cualquier local Bokalia para empezar a sumar puntos.</p>
                      </div>
                   )}
 
                   {user && walletsConPuntos.length > 0 && (
-                     <div className="space-y-4 mt-4">
+                     <div className="space-y-6 mt-4">
                         {walletsConPuntos.map((w, idx) => {
-                           const bgColor = w.restaurante?.color_tema || '#dc2626'; 
-                           
-                           // 🔥 NUEVO: CALCULAR BARRA DE PROGRESO DINÁMICA
+                           const bgColor = w.restaurante?.color_tema || '#e25e4c'; 
                            const premiosLocal = recompensas.filter(r => r.restaurante_id === w.restaurante?.id);
                            const nextReward = premiosLocal.find(r => r.coste_puntos > w.puntos) || premiosLocal[premiosLocal.length - 1] || { titulo: 'Nivel Máximo', coste_puntos: w.puntos || 1000 };
                            const progress = Math.min((w.puntos / nextReward.coste_puntos) * 100, 100);
 
                            return (
-                             <div key={idx} className="relative overflow-hidden rounded-[2.5rem] p-8 shadow-xl text-white border border-white/20" style={{ background: `linear-gradient(135deg, ${bgColor}, #111827)` }}>
-                               <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-white opacity-10"></div>
-                               <div className="absolute -left-8 -bottom-8 w-32 h-32 rounded-full bg-white opacity-5"></div>
+                             <div key={idx} className="relative overflow-hidden rounded-[2rem] p-8 shadow-elegant-lg text-white border border-white/10" style={{ background: `linear-gradient(135deg, ${bgColor}, #302b28)` }}>
+                               <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-white opacity-10 blur-2xl"></div>
+                               <div className="absolute -left-8 -bottom-8 w-32 h-32 rounded-full bg-white opacity-5 blur-xl"></div>
                                
-                               <div className="relative z-10 flex justify-between items-start mb-6">
+                               <div className="relative z-10 flex justify-between items-start mb-8">
                                  <div>
-                                   <p className="text-xs font-black uppercase tracking-widest mb-1 opacity-70">{w.restaurante?.nombre || 'Restaurante'}</p>
-                                   <p className="text-5xl font-black tracking-tighter drop-shadow-md">{w.puntos} <span className="text-xl font-bold opacity-80">pts</span></p>
+                                   <p className="text-xs font-bold uppercase tracking-widest mb-1 opacity-80">{w.restaurante?.nombre || 'Restaurante'}</p>
+                                   <p className="text-5xl font-black tracking-tighter">{w.puntos} <span className="text-xl font-medium opacity-80">pts</span></p>
                                  </div>
-                                 <div className="bg-black/30 backdrop-blur-md px-3 py-1.5 rounded-xl text-[10px] font-black uppercase shadow-sm border border-white/20 tracking-widest">
+                                 <div className="bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase shadow-sm tracking-widest border border-white/20">
                                    VIP
                                  </div>
                                </div>
                                
-                               <div className="relative z-10 bg-black/20 p-4 rounded-2xl border border-white/10 backdrop-blur-sm shadow-inner mb-4">
-                                 <div className="flex justify-between text-xs font-black opacity-90 mb-2">
-                                   <span className="uppercase tracking-wide truncate pr-2">Meta: {nextReward.titulo}</span>
+                               <div className="relative z-10 mb-6">
+                                 <div className="flex justify-between text-xs font-semibold opacity-90 mb-3">
+                                   <span className="uppercase tracking-wide truncate pr-2">Siguiente: {nextReward.titulo}</span>
                                    <span className="shrink-0">{w.puntos} / {nextReward.coste_puntos}</span>
                                  </div>
-                                 <div className="h-3 w-full bg-black/40 rounded-full overflow-hidden shadow-inner">
-                                   <div className="h-full bg-white rounded-full transition-all duration-1000 shadow-sm" style={{ width: `${progress}%` }}></div>
+                                 <div className="h-2 w-full bg-black/20 rounded-full overflow-hidden">
+                                   <div className="h-full bg-white rounded-full transition-all duration-1000" style={{ width: `${progress}%` }}></div>
                                  </div>
                                </div>
 
-                               {/* 🔥 NUEVO: BOTÓN PARA VER PREMIOS */}
-                               <button onClick={() => setModalPremios(w)} className="relative z-10 w-full bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 text-white font-black py-4 rounded-xl text-sm tracking-widest uppercase active:scale-95 transition-transform shadow-sm">
-                                  🎁 Ver Premios Canjeables
+                               <button onClick={() => setModalPremios(w)} className="relative z-10 w-full bg-white text-bokalia-dark font-bold py-4 rounded-xl text-sm active:scale-95 transition-transform shadow-lg">
+                                  Ver Catálogo de Premios
                                </button>
                              </div>
                            );
@@ -281,20 +324,20 @@
                   )}
 
                   {sugerenciasFiltradas.length > 0 && (
-                     <div className="mt-10">
-                        <h2 className="text-2xl font-black text-gray-800 mb-2 tracking-tight flex items-center gap-2">
-                           <span>📍</span> Descubre más locales
+                     <div className="mt-12">
+                        <h2 className="text-xl font-bold text-bokalia-dark mb-2 tracking-tight flex items-center gap-2">
+                           Descubre más locales
                         </h2>
-                        <p className="text-gray-500 text-sm font-medium mb-6">Visita nuestros restaurantes asociados y suma puntos en tu Wallet Bokalia.</p>
+                        <p className="text-gray-500 text-sm mb-6">Visita nuestros restaurantes asociados y expande tu wallet.</p>
                         
                         <div className="grid gap-4 overflow-x-auto pb-4 custom-scrollbar snap-x" style={{ gridTemplateRows: 'repeat(2, 1fr)', gridAutoFlow: 'column', gridAutoColumns: 'calc(50% - 0.5rem)' }}>
                            {sugerenciasFiltradas.map(rest => (
-                              <div key={rest.id} className="snap-start relative overflow-hidden p-5 rounded-[1.5rem] shadow-sm border border-white/20 text-white flex items-center h-24" style={{ background: `linear-gradient(135deg, ${rest.color_tema || '#dc2626'}, #111827)` }}>
+                              <div key={rest.id} className="snap-start relative overflow-hidden p-5 rounded-3xl shadow-elegant border border-bokalia-beige bg-white flex items-center h-24">
+                                 <div className="w-1.5 h-10 rounded-full mr-3" style={{ backgroundColor: rest.color_tema || '#e25e4c' }}></div>
                                  <div className="relative z-10">
-                                    <p className="font-black text-[15px] leading-tight drop-shadow-sm">{rest.nombre}</p>
-                                    <p className="text-[9px] font-bold uppercase tracking-widest opacity-80 mt-1">Colaborador</p>
+                                    <p className="font-bold text-sm text-bokalia-dark leading-tight">{rest.nombre}</p>
+                                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mt-1">Colaborador</p>
                                  </div>
-                                 <div className="absolute -right-4 -bottom-4 w-16 h-16 rounded-full bg-white opacity-10"></div>
                               </div>
                            ))}
                         </div>
@@ -302,12 +345,12 @@
                   )}
 
                   {user && !window.matchMedia('(display-mode: standalone)').matches && !window.navigator.standalone && (
-                     <div onClick={() => setShowInstallTutorial(true)} className="mt-8 bg-blue-600 text-white p-5 rounded-3xl flex justify-between items-center shadow-md cursor-pointer active:scale-95 transition-transform">
+                     <div onClick={() => setShowInstallTutorial(true)} className="mt-10 bg-white border border-bokalia-beige p-6 rounded-[2rem] flex justify-between items-center shadow-sm cursor-pointer active:scale-95 transition-transform">
                         <div>
-                           <p className="text-sm font-black mb-1">📲 Instala Bokalia</p>
-                           <p className="text-xs font-medium opacity-90">Añádela a tu pantalla de inicio.</p>
+                           <p className="text-sm font-bold text-bokalia-dark mb-1">App Nativa</p>
+                           <p className="text-xs font-medium text-gray-500">Añádenos a tu inicio.</p>
                         </div>
-                        <button className="bg-white text-blue-600 text-xs font-black px-4 py-2 rounded-xl shadow-sm">Ver cómo</button>
+                        <button className="bg-bokalia-beige text-bokalia-dark text-xs font-bold px-4 py-2 rounded-lg">Instalar</button>
                      </div>
                   )}
                </>
@@ -315,21 +358,19 @@
 
             {vistaActual === 'historial' && (
                <div className="animate-fade-in">
-                  <h2 className="text-2xl font-black text-gray-800 mb-6 tracking-tight flex items-center gap-2">
-                     <span>🍔</span> Últimos Pedidos
-                  </h2>
+                  <h2 className="text-xl font-bold text-bokalia-dark mb-6 tracking-tight">Últimos Pedidos</h2>
                   
                   {!user && (
-                     <div className="bg-white p-8 rounded-[2rem] text-center border-2 border-dashed border-gray-200 mt-4">
-                        <p className="text-gray-500 font-bold mb-6">Inicia sesión para ver tu historial de visitas antiguas.</p>
-                        <button onClick={() => setShowAuthModal(true)} className="bg-red-600 text-white px-8 py-4 rounded-2xl font-black w-full shadow-lg">Entrar ahora</button>
+                     <div className="bg-white p-8 rounded-[2rem] text-center border border-bokalia-beige mt-4 shadow-sm">
+                        <p className="text-gray-500 font-medium mb-6">Inicia sesión para ver tu historial de visitas.</p>
+                        <button onClick={() => setShowAuthModal(true)} className="bg-bokalia-coral text-white px-8 py-4 rounded-2xl font-bold w-full shadow-lg">Entrar ahora</button>
                      </div>
                   )}
                   
                   {user && historial.length === 0 && (
-                     <div className="bg-gray-100 p-8 rounded-[2rem] text-center mt-4">
-                        <span className="text-4xl grayscale opacity-50 block mb-3">🧾</span>
-                        <p className="text-gray-500 font-bold">Aún no hay visitas pagadas.</p>
+                     <div className="bg-white p-8 rounded-[2rem] text-center mt-4 border border-bokalia-beige shadow-sm">
+                        <span className="text-4xl opacity-50 block mb-3">🧾</span>
+                        <p className="text-gray-500 font-medium">Aún no hay visitas pagadas.</p>
                      </div>
                   )}
 
@@ -337,22 +378,21 @@
                      <div className="space-y-4">
                         {historial.map((h) => {
                            const total = h.items.reduce((acc, item) => acc + (item.cantidad * item.precio_unitario), 0);
-                           const colorLocal = h.sesion?.restaurante?.color_tema || '#dc2626';
                            return (
-                              <div key={h.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
-                                <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-3">
+                              <div key={h.id} className="bg-white p-6 rounded-3xl shadow-sm border border-bokalia-beige">
+                                <div className="flex justify-between items-center border-b border-bokalia-beige pb-4 mb-4">
                                   <div>
-                                     <span className="text-[10px] font-black text-white px-2 py-1 rounded-md uppercase" style={{ backgroundColor: colorLocal }}>
+                                     <span className="text-[11px] font-bold text-bokalia-dark uppercase tracking-widest">
                                        {h.sesion?.restaurante?.nombre || 'Local Bokalia'}
                                      </span>
-                                     <span className="text-[10px] font-bold text-gray-400 block mt-2">{formatDate(h.fecha)}</span>
+                                     <span className="text-[11px] font-medium text-gray-400 block mt-1">{formatDate(h.fecha)}</span>
                                   </div>
-                                  <span className="text-lg font-black text-gray-800">{formatMoney(total)}€</span>
+                                  <span className="text-lg font-black text-bokalia-coral">{formatMoney(total)}€</span>
                                 </div>
-                                <ul className="text-sm text-gray-700 space-y-2">
+                                <ul className="text-sm text-gray-600 space-y-3">
                                   {h.items.map((item, idx) => (
                                     <li key={idx} className="flex gap-3 font-medium items-center">
-                                       <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-lg text-xs font-black">{item.cantidad}x</span>
+                                       <span className="bg-bokalia-beige text-bokalia-dark px-2 py-0.5 rounded-md text-xs font-bold">{item.cantidad}x</span>
                                        {item.producto?.nombre}
                                     </li>
                                   ))}
@@ -360,8 +400,8 @@
                               </div>
                            );
                         })}
-                        <button onClick={borrarHistorial} className="w-full mt-6 bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl active:bg-gray-200 transition-colors">
-                           Limpiar historial visual
+                        <button onClick={borrarHistorial} className="w-full mt-8 text-gray-400 font-bold py-4 rounded-2xl active:bg-bokalia-beige transition-colors text-sm uppercase tracking-widest">
+                           Ocultar historial
                         </button>
                      </div>
                   )}
@@ -369,56 +409,58 @@
             )}
 
             {vistaActual === 'reservas' && (
-               <div className="p-8 text-center mt-10 animate-fade-in">
-                 <div className="text-6xl mb-6">📅</div>
-                 <h2 className="text-3xl font-black text-gray-800 mb-4 tracking-tighter">Próximamente</h2>
-                 <p className="text-gray-500 font-medium text-lg">Estamos preparando el sistema de reservas.</p>
+               <div className="p-10 text-center mt-10 animate-fade-in bg-white rounded-[2rem] border border-bokalia-beige shadow-sm">
+                 <div className="text-5xl mb-6 opacity-70">📅</div>
+                 <h2 className="text-2xl font-bold text-bokalia-dark mb-2">Próximamente</h2>
+                 <p className="text-gray-500 font-medium text-sm">Estamos preparando una experiencia de reservas a tu medida.</p>
                </div>
             )}
           </main>
 
-          {/* MODALES FLOTANTES */}
-          
-          {/* 🔥 NUEVO MODAL: CATÁLOGO DE PREMIOS */}
+          {/* ========================================== */}
+          {/* 🔥 MODALES FLOTANTES PREMIUM 🔥              */}
+          {/* ========================================== */}
+
+          {/* MODAL: PREMIOS VIP */}
           {modalPremios && (
-            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[150] flex items-end justify-center p-0 animate-fade-in">
-              <div className="bg-gray-50 w-full max-w-md rounded-t-[2.5rem] flex flex-col shadow-2xl relative animate-slide-up h-[85vh]">
+            <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[150] flex items-end justify-center p-0 animate-fade-in">
+              <div className="bg-bokalia-cream w-full max-w-md rounded-t-[2.5rem] flex flex-col shadow-2xl relative animate-slide-up h-[85vh]">
                 
-                <div className="p-6 pb-4 border-b border-gray-200 flex justify-between items-center bg-white rounded-t-[2.5rem] sticky top-0 z-10">
+                <div className="p-6 pb-4 flex justify-between items-center rounded-t-[2.5rem] sticky top-0 z-10 bg-bokalia-cream">
                    <div>
-                      <h3 className="text-2xl font-black text-gray-900 tracking-tight">Premios VIP</h3>
-                      <p className="text-sm font-bold text-gray-500 mt-1">Tienes <span className="text-yellow-600">{modalPremios.puntos} pts</span></p>
+                      <h3 className="text-2xl font-black text-bokalia-dark tracking-tight">Premios VIP</h3>
+                      <p className="text-sm font-bold text-gray-500 mt-1">Tienes <span className="text-bokalia-coral">{modalPremios.puntos} pts</span></p>
                    </div>
-                   <button onClick={() => setModalPremios(null)} className="text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center active:scale-95 transition-transform">✕</button>
+                   <button onClick={() => setModalPremios(null)} className="text-gray-400 font-bold text-xl bg-white w-10 h-10 rounded-full flex items-center justify-center shadow-sm active:scale-95 transition-transform border border-bokalia-beige">✕</button>
                 </div>
 
-                <div className="flex-grow overflow-y-auto p-4 space-y-4">
+                <div className="flex-grow overflow-y-auto p-5 space-y-4">
                    {recompensas.filter(r => r.restaurante_id === modalPremios.restaurante?.id).length === 0 ? (
-                      <div className="p-8 text-center opacity-50">
-                         <p className="text-4xl mb-2">🎁</p>
-                         <p className="font-bold text-gray-600">Este local aún no tiene premios creados.</p>
+                      <div className="p-8 text-center opacity-50 mt-10">
+                         <p className="text-5xl mb-4">🎁</p>
+                         <p className="font-medium text-gray-600">Catálogo en preparación.</p>
                       </div>
                    ) : (
                       recompensas.filter(r => r.restaurante_id === modalPremios.restaurante?.id).map(premio => {
                          const puedoCanjear = modalPremios.puntos >= premio.coste_puntos;
                          return (
-                            <div key={premio.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex">
-                               <div className="w-1/3 bg-gray-200 shrink-0">
+                            <div key={premio.id} className="bg-white rounded-3xl shadow-sm border border-bokalia-beige overflow-hidden flex flex-col">
+                               <div className="h-40 bg-gray-100 shrink-0 relative">
                                   <img src={premio.imagen_url} className="w-full h-full object-cover" />
                                </div>
-                               <div className="p-4 flex flex-col flex-grow">
-                                  <h4 className="font-black text-gray-800 text-lg leading-tight mb-1">{premio.titulo}</h4>
-                                  <p className="text-xs text-gray-500 font-medium mb-3 line-clamp-2">{premio.descripcion}</p>
+                               <div className="p-5 flex flex-col flex-grow">
+                                  <h4 className="font-bold text-bokalia-dark text-lg leading-tight mb-2">{premio.titulo}</h4>
+                                  <p className="text-xs text-gray-500 font-medium mb-6 leading-relaxed line-clamp-2">{premio.descripcion}</p>
                                   
                                   <div className="mt-auto">
                                      {puedoCanjear ? (
-                                        <button onClick={intentarCanjear} className="w-full bg-green-500 text-white font-black py-2.5 rounded-xl text-sm shadow-md active:scale-95 transition-transform flex justify-between px-4 items-center">
+                                        <button onClick={intentarCanjear} className="w-full bg-bokalia-coral text-white font-bold py-3.5 rounded-2xl text-sm shadow-lg shadow-bokalia-coral/30 active:scale-95 transition-transform flex justify-between px-6 items-center">
                                            <span>Canjear</span>
                                            <span>{premio.coste_puntos} pts</span>
                                         </button>
                                      ) : (
-                                        <button disabled className="w-full bg-gray-100 text-gray-400 font-black py-2.5 rounded-xl text-sm flex justify-between px-4 items-center">
-                                           <span>Faltan {premio.coste_puntos - modalPremios.puntos} pts</span>
+                                        <button disabled className="w-full bg-bokalia-beige text-gray-400 font-bold py-3.5 rounded-2xl text-sm flex justify-between px-6 items-center">
+                                           <span>Te faltan {premio.coste_puntos - modalPremios.puntos} pts</span>
                                            <span>{premio.coste_puntos} pts</span>
                                         </button>
                                      )}
@@ -433,35 +475,61 @@
             </div>
           )}
 
+          {/* 🔥 NUEVO MODAL ERROR CANJEO (CENTRADO) 🔥 */}
+          {modalErrorCanjeo && (
+             <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-md z-[300] flex items-center justify-center p-4 animate-fade-in">
+                <div className="bg-white w-full max-w-xs rounded-[2rem] p-8 text-center shadow-2xl relative animate-slide-up border border-bokalia-beige">
+                   <div className="text-5xl mb-4">🛎️</div>
+                   <h3 className="text-xl font-bold text-bokalia-dark mb-2">Canjeo en Local</h3>
+                   <p className="text-sm text-gray-500 font-medium mb-8 leading-relaxed">Para disfrutar tu premio VIP, por favor avisa a tu camarero en el momento de pedir la cuenta.</p>
+                   <button onClick={() => setModalErrorCanjeo(false)} className="w-full bg-bokalia-coral text-white font-bold py-3.5 rounded-xl shadow-lg active:scale-95 transition-transform">Entendido</button>
+                </div>
+             </div>
+          )}
+
+          {/* 🔥 NUEVO MODAL NOTIFICACIONES PUSH (TIEMPO REAL) 🔥 */}
+          {notificacionActiva && (
+             <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-md z-[300] flex items-center justify-center p-4 animate-fade-in">
+                <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 text-center shadow-2xl relative animate-slide-up border-4 border-bokalia-beige">
+                   <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 bg-bokalia-coral text-white text-3xl w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-white">📣</div>
+                   <h3 className="text-2xl font-black text-bokalia-dark mb-3 mt-6 tracking-tight">{notificacionActiva.titulo}</h3>
+                   <p className="text-sm text-gray-600 font-medium mb-8 leading-relaxed">{notificacionActiva.mensaje}</p>
+                   <button onClick={() => setNotificacionActiva(null)} className="w-full bg-bokalia-dark text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-transform">Ver menú</button>
+                </div>
+             </div>
+          )}
+
+          {/* MODAL: AUTH */}
           {showAuthModal && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in">
-              <div className="bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
-                <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
-                <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">{authMode === 'login' ? 'Hola' : 'Únete'}</h3>
-                <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta.' : 'Crea tu cuenta para ganar puntos.'}</p>
-                <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
-                <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
-                <button onClick={handleAuth} className={`w-full text-white font-black py-5 rounded-2xl text-xl active:scale-95 transition-transform mb-4 shadow-lg ${authMode === 'login' ? 'bg-red-600 shadow-red-600/30' : 'bg-yellow-400 text-yellow-900 shadow-yellow-400/50'}`}>
+            <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[200] flex items-end justify-center p-0 animate-fade-in">
+              <div className="bg-white rounded-t-[2.5rem] p-8 w-full max-w-md relative shadow-2xl animate-slide-up">
+                <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-bold text-xl bg-bokalia-cream w-10 h-10 rounded-full flex items-center justify-center border border-bokalia-beige active:scale-95">✕</button>
+                <h3 className="text-3xl font-black mb-2 text-bokalia-dark tracking-tight">{authMode === 'login' ? 'Hola de nuevo' : 'Únete al club'}</h3>
+                <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta para ver tu wallet.' : 'Crea tu cuenta para ganar puntos.'}</p>
+                <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-4 bg-bokalia-cream border border-bokalia-beige rounded-2xl outline-none font-medium focus:border-bokalia-coral transition-colors" />
+                <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-8 p-4 bg-bokalia-cream border border-bokalia-beige rounded-2xl outline-none font-medium focus:border-bokalia-coral transition-colors" />
+                <button onClick={handleAuth} className="w-full text-white font-bold py-4 rounded-2xl text-lg active:scale-95 transition-transform mb-4 shadow-lg bg-bokalia-coral">
                    {authMode === 'login' ? 'Entrar' : 'Registrarme'}
                 </button>
-                <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-gray-500 font-bold py-3">{authMode === 'login' ? 'No tengo cuenta, crear una' : 'Ya tengo cuenta, iniciar sesión'}</button>
+                <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full text-gray-500 font-medium py-2 text-sm">{authMode === 'login' ? 'No tengo cuenta, crear una' : 'Ya tengo cuenta, iniciar sesión'}</button>
               </div>
             </div>
           )}
 
+          {/* MODAL: INSTALACIÓN */}
           {showInstallTutorial && (
-             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-end justify-center p-0 animate-fade-in">
-                <div className="bg-white w-full max-w-md rounded-t-[2.5rem] p-8 text-center shadow-2xl relative animate-slide-up border-t-8 border-blue-600">
-                   <button onClick={() => setShowInstallTutorial(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center active:bg-gray-200">✕</button>
-                   <div className="text-6xl mb-4 mt-2">📲</div>
-                   <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">Añádenos a tu móvil</h3>
-                   <p className="text-gray-500 font-medium mb-8 text-sm">Instala la App en tu pantalla de inicio para entrar más rápido.</p>
-                   <div className="bg-gray-50 p-5 rounded-2xl text-left text-sm font-bold text-gray-700 space-y-4 mb-8 border border-gray-200 shadow-inner">
+             <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[200] flex items-end justify-center p-0 animate-fade-in">
+                <div className="bg-white w-full max-w-md rounded-t-[2.5rem] p-8 text-center shadow-2xl relative animate-slide-up border-t-8 border-bokalia-coral">
+                   <button onClick={() => setShowInstallTutorial(false)} className="absolute top-6 right-6 text-gray-400 font-bold text-xl bg-bokalia-cream w-10 h-10 rounded-full flex items-center justify-center border border-bokalia-beige active:scale-95">✕</button>
+                   <div className="text-5xl mb-4 mt-2">📲</div>
+                   <h3 className="text-2xl font-black text-bokalia-dark mb-2 tracking-tight">App Nativa</h3>
+                   <p className="text-gray-500 font-medium mb-8 text-sm">Instala la App en tu pantalla de inicio para acceder al instante.</p>
+                   <div className="bg-bokalia-cream p-5 rounded-2xl text-left text-sm font-medium text-bokalia-dark space-y-4 mb-8 border border-bokalia-beige">
                       <p className="flex items-start gap-3"><span className="text-xl">1️⃣</span> <span className="mt-1">Toca <b>Compartir</b> en Safari o <b>3 puntitos</b> en Chrome.</span></p>
                       <p className="flex items-center gap-3"><span className="text-xl">2️⃣</span> <span>Desliza por el menú de opciones.</span></p>
                       <p className="flex items-start gap-3"><span className="text-xl">3️⃣</span> <span className="mt-1">Toca <b>Añadir a pantalla de inicio</b> ➕.</span></p>
                    </div>
-                   <button onClick={() => setShowInstallTutorial(false)} className="w-full bg-blue-100 text-blue-600 font-black py-4 rounded-2xl text-lg active:scale-95 transition-transform">Entendido</button>
+                   <button onClick={() => setShowInstallTutorial(false)} className="w-full bg-bokalia-beige text-bokalia-dark font-bold py-4 rounded-2xl text-lg active:scale-95 transition-transform">Entendido</button>
                 </div>
              </div>
           )}
