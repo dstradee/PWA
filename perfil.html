@@ -14,10 +14,10 @@
         extend: {
           colors: {
             bokalia: {
-              coral: '#e25e4c',  /* Terracota/Coral corporativo */
-              cream: '#fdfbf7',  /* Crema muy claro para fondos */
-              beige: '#f4ede5',  /* Beige suave para bordes/zonas secundarias */
-              dark: '#302b28'    /* Gris muy oscuro/cálido para textos */
+              coral: '#e25e4c',  
+              cream: '#fdfbf7',  
+              beige: '#f4ede5',  
+              dark: '#302b28'    
             }
           },
           boxShadow: {
@@ -34,7 +34,6 @@
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <!-- Fuente más elegante y moderna -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 
   <style>
@@ -47,7 +46,6 @@
     .custom-scrollbar::-webkit-scrollbar { height: 0px; display: none; }
     .custom-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     
-    /* Textura muy sutil para el fondo */
     .bg-texture {
        background-color: #fdfbf7;
        background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23e25e4c' fill-opacity='0.02' fill-rule='evenodd'%3E%3Ccircle cx='3' cy='3' r='1'/%3E%3Ccircle cx='13' cy='13' r='1'/%3E%3C/g%3E%3C/svg%3E");
@@ -97,7 +95,10 @@
       const [sugerencias, setSugerencias] = useState([]); 
       
       const [recompensas, setRecompensas] = useState([]);
+      const [niveles, setNiveles] = useState([]); // 🔥 ESTADO NIVELES
+      
       const [modalPremios, setModalPremios] = useState(null); 
+      const [modalNiveles, setModalNiveles] = useState(null); // 🔥 MODAL NIVELES
       
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('login'); 
@@ -107,7 +108,6 @@
       const [showInstallTutorial, setShowInstallTutorial] = useState(false);
       const [toastMsg, setToastMsg] = useState('');
 
-      // 🔥 NUEVOS ESTADOS
       const [notificacionActiva, setNotificacionActiva] = useState(null);
       const [modalErrorCanjeo, setModalErrorCanjeo] = useState(false);
       const walletsRef = useRef([]);
@@ -127,17 +127,15 @@
 
         const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
           if (session?.user) procesarUsuario(session.user);
-          else { setUser(null); setWallets([]); setHistorial([]); setRecompensas([]); setLoading(false); }
+          else { setUser(null); setWallets([]); setHistorial([]); setRecompensas([]); setNiveles([]); setLoading(false); }
         });
 
-        // 🔥 OÍDO BIONICO DE NOTIFICACIONES PUSH (TIEMPO REAL) 🔥
         const canalNotis = supabase.channel('notificaciones_push')
            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notificaciones' }, payload => {
               const noti = payload.new;
               if (noti.es_global) {
-                 setNotificacionActiva(noti); // Es global, la mostramos a todos
+                 setNotificacionActiva(noti);
               } else if (noti.restaurante_id) {
-                 // Si es de un local, comprobamos si el usuario tiene wallet ahí
                  const tieneWallet = walletsRef.current.some(w => w.restaurante?.id === noti.restaurante_id);
                  if (tieneWallet) setNotificacionActiva(noti);
               }
@@ -171,9 +169,15 @@
              setWallets(misPuntos);
              const restIds = misPuntos.map(w => w.restaurante?.id).filter(Boolean);
              if (restIds.length > 0) {
+                // Descargar Premios
                 const { data: recs } = await supabase.from('recompensas')
                    .select('*').in('restaurante_id', restIds).eq('activo', true).order('coste_puntos', { ascending: true });
                 if (recs) setRecompensas(recs);
+
+                // 🔥 Descargar Niveles
+                const { data: nivs } = await supabase.from('niveles_membresia')
+                   .select('*').in('restaurante_id', restIds).order('puntos_minimos', { ascending: true });
+                if (nivs) setNiveles(nivs);
              }
           }
 
@@ -207,16 +211,11 @@
 
       const formatMoney = (num) => Number(num).toFixed(2);
       const formatDate = (dateStr) => {
-        const d = new Date(dateStr);
-        return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} - ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+         const d = new Date(dateStr);
+         return `${d.getDate()}/${d.getMonth()+1}/${d.getFullYear()} - ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
       };
-
       const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
-
-      // 🔥 MODAL CENTRADO AL CANJEAR PUNTOS 🔥
-      const intentarCanjear = () => {
-         setModalErrorCanjeo(true);
-      };
+      const intentarCanjear = () => { setModalErrorCanjeo(true); };
 
       const walletsConPuntos = wallets.filter(w => w.puntos > 0);
       const restaurantesConPuntosIds = walletsConPuntos.map(w => w.restaurante?.id);
@@ -242,7 +241,6 @@
             </div>
           )}
 
-          {/* 🔥 CABECERA PREMIUM 🔥 */}
           <header className="bg-white border-b border-bokalia-beige p-6 shadow-sm flex justify-between items-center rounded-b-[2rem] z-10 relative">
             <h1 className="font-black text-3xl text-bokalia-coral tracking-tighter">BOKALIA</h1>
             {user ? (
@@ -285,38 +283,61 @@
                      <div className="space-y-6 mt-4">
                         {walletsConPuntos.map((w, idx) => {
                            const bgColor = w.restaurante?.color_tema || '#e25e4c'; 
+                           
+                           // Lógica Premios
                            const premiosLocal = recompensas.filter(r => r.restaurante_id === w.restaurante?.id);
                            const nextReward = premiosLocal.find(r => r.coste_puntos > w.puntos) || premiosLocal[premiosLocal.length - 1] || { titulo: 'Nivel Máximo', coste_puntos: w.puntos || 1000 };
                            const progress = Math.min((w.puntos / nextReward.coste_puntos) * 100, 100);
+
+                           // 🔥 Lógica Niveles
+                           const nivelesLocal = niveles.filter(n => n.restaurante_id === w.restaurante?.id);
+                           const currentLevel = [...nivelesLocal].reverse().find(n => n.puntos_minimos <= w.puntos) || { nombre: 'Miembro', color: '#ffffff', puntos_minimos: 0 };
+                           const nextLevel = nivelesLocal.find(n => n.puntos_minimos > w.puntos);
 
                            return (
                              <div key={idx} className="relative overflow-hidden rounded-[2rem] p-8 shadow-elegant-lg text-white border border-white/10" style={{ background: `linear-gradient(135deg, ${bgColor}, #302b28)` }}>
                                <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-white opacity-10 blur-2xl"></div>
                                <div className="absolute -left-8 -bottom-8 w-32 h-32 rounded-full bg-white opacity-5 blur-xl"></div>
                                
-                               <div className="relative z-10 flex justify-between items-start mb-8">
+                               <div className="relative z-10 flex justify-between items-start mb-6">
                                  <div>
                                    <p className="text-xs font-bold uppercase tracking-widest mb-1 opacity-80">{w.restaurante?.nombre || 'Restaurante'}</p>
                                    <p className="text-5xl font-black tracking-tighter">{w.puntos} <span className="text-xl font-medium opacity-80">pts</span></p>
                                  </div>
-                                 <div className="bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase shadow-sm tracking-widest border border-white/20">
-                                   VIP
+                                 
+                                 {/* ETIQUETA RANGO ACTUAL */}
+                                 <div className="bg-white/10 backdrop-blur-md px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase shadow-sm tracking-widest border border-white/20 flex items-center gap-1.5">
+                                   <span className="w-2 h-2 rounded-full shadow-sm" style={{ backgroundColor: currentLevel.color }}></span>
+                                   {currentLevel.nombre}
                                  </div>
                                </div>
                                
                                <div className="relative z-10 mb-6">
                                  <div className="flex justify-between text-xs font-semibold opacity-90 mb-3">
-                                   <span className="uppercase tracking-wide truncate pr-2">Siguiente: {nextReward.titulo}</span>
+                                   <span className="uppercase tracking-wide truncate pr-2">Regalo: {nextReward.titulo}</span>
                                    <span className="shrink-0">{w.puntos} / {nextReward.coste_puntos}</span>
                                  </div>
                                  <div className="h-2 w-full bg-black/20 rounded-full overflow-hidden">
                                    <div className="h-full bg-white rounded-full transition-all duration-1000" style={{ width: `${progress}%` }}></div>
                                  </div>
+                                 
+                                 {/* 🔥 TEXTO: CUANTO FALTA PARA EL SIGUIENTE NIVEL VIP */}
+                                 {nextLevel && (
+                                    <p className="text-[11px] font-medium text-white/70 text-center mt-3">
+                                       A <span className="font-bold text-white">{nextLevel.puntos_minimos - w.puntos} pts</span> del rango <b style={{ color: nextLevel.color }}>{nextLevel.nombre}</b>
+                                    </p>
+                                 )}
                                </div>
 
-                               <button onClick={() => setModalPremios(w)} className="relative z-10 w-full bg-white text-bokalia-dark font-bold py-4 rounded-xl text-sm active:scale-95 transition-transform shadow-lg">
-                                  Ver Catálogo de Premios
-                               </button>
+                               {/* 🔥 BOTONES DIVIDIDOS ELEGANTES */}
+                               <div className="relative z-10 flex gap-3 mt-2">
+                                  <button onClick={() => setModalPremios(w)} className="flex-1 bg-white text-bokalia-dark font-bold py-3.5 rounded-xl text-sm active:scale-95 transition-transform shadow-lg border border-transparent">
+                                     🎁 Premios
+                                  </button>
+                                  <button onClick={() => setModalNiveles(w)} className="flex-1 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white font-bold py-3.5 rounded-xl text-sm active:scale-95 transition-transform border border-white/20 shadow-sm">
+                                     ⭐ Rangos
+                                  </button>
+                               </div>
                              </div>
                            );
                         })}
@@ -325,11 +346,8 @@
 
                   {sugerenciasFiltradas.length > 0 && (
                      <div className="mt-12">
-                        <h2 className="text-xl font-bold text-bokalia-dark mb-2 tracking-tight flex items-center gap-2">
-                           Descubre más locales
-                        </h2>
+                        <h2 className="text-xl font-bold text-bokalia-dark mb-2 tracking-tight flex items-center gap-2">Descubre más locales</h2>
                         <p className="text-gray-500 text-sm mb-6">Visita nuestros restaurantes asociados y expande tu wallet.</p>
-                        
                         <div className="grid gap-4 overflow-x-auto pb-4 custom-scrollbar snap-x" style={{ gridTemplateRows: 'repeat(2, 1fr)', gridAutoFlow: 'column', gridAutoColumns: 'calc(50% - 0.5rem)' }}>
                            {sugerenciasFiltradas.map(rest => (
                               <div key={rest.id} className="snap-start relative overflow-hidden p-5 rounded-3xl shadow-elegant border border-bokalia-beige bg-white flex items-center h-24">
@@ -359,21 +377,15 @@
             {vistaActual === 'historial' && (
                <div className="animate-fade-in">
                   <h2 className="text-xl font-bold text-bokalia-dark mb-6 tracking-tight">Últimos Pedidos</h2>
-                  
                   {!user && (
                      <div className="bg-white p-8 rounded-[2rem] text-center border border-bokalia-beige mt-4 shadow-sm">
                         <p className="text-gray-500 font-medium mb-6">Inicia sesión para ver tu historial de visitas.</p>
                         <button onClick={() => setShowAuthModal(true)} className="bg-bokalia-coral text-white px-8 py-4 rounded-2xl font-bold w-full shadow-lg">Entrar ahora</button>
                      </div>
                   )}
-                  
                   {user && historial.length === 0 && (
-                     <div className="bg-white p-8 rounded-[2rem] text-center mt-4 border border-bokalia-beige shadow-sm">
-                        <span className="text-4xl opacity-50 block mb-3">🧾</span>
-                        <p className="text-gray-500 font-medium">Aún no hay visitas pagadas.</p>
-                     </div>
+                     <div className="bg-white p-8 rounded-[2rem] text-center mt-4 border border-bokalia-beige shadow-sm"><span className="text-4xl opacity-50 block mb-3">🧾</span><p className="text-gray-500 font-medium">Aún no hay visitas pagadas.</p></div>
                   )}
-
                   {user && historial.length > 0 && (
                      <div className="space-y-4">
                         {historial.map((h) => {
@@ -382,9 +394,7 @@
                               <div key={h.id} className="bg-white p-6 rounded-3xl shadow-sm border border-bokalia-beige">
                                 <div className="flex justify-between items-center border-b border-bokalia-beige pb-4 mb-4">
                                   <div>
-                                     <span className="text-[11px] font-bold text-bokalia-dark uppercase tracking-widest">
-                                       {h.sesion?.restaurante?.nombre || 'Local Bokalia'}
-                                     </span>
+                                     <span className="text-[11px] font-bold text-bokalia-dark uppercase tracking-widest">{h.sesion?.restaurante?.nombre || 'Local Bokalia'}</span>
                                      <span className="text-[11px] font-medium text-gray-400 block mt-1">{formatDate(h.fecha)}</span>
                                   </div>
                                   <span className="text-lg font-black text-bokalia-coral">{formatMoney(total)}€</span>
@@ -392,17 +402,14 @@
                                 <ul className="text-sm text-gray-600 space-y-3">
                                   {h.items.map((item, idx) => (
                                     <li key={idx} className="flex gap-3 font-medium items-center">
-                                       <span className="bg-bokalia-beige text-bokalia-dark px-2 py-0.5 rounded-md text-xs font-bold">{item.cantidad}x</span>
-                                       {item.producto?.nombre}
+                                       <span className="bg-bokalia-beige text-bokalia-dark px-2 py-0.5 rounded-md text-xs font-bold">{item.cantidad}x</span>{item.producto?.nombre}
                                     </li>
                                   ))}
                                 </ul>
                               </div>
                            );
                         })}
-                        <button onClick={borrarHistorial} className="w-full mt-8 text-gray-400 font-bold py-4 rounded-2xl active:bg-bokalia-beige transition-colors text-sm uppercase tracking-widest">
-                           Ocultar historial
-                        </button>
+                        <button onClick={borrarHistorial} className="w-full mt-8 text-gray-400 font-bold py-4 rounded-2xl active:bg-bokalia-beige transition-colors text-sm uppercase tracking-widest">Ocultar historial</button>
                      </div>
                   )}
                </div>
@@ -425,43 +432,33 @@
           {modalPremios && (
             <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[150] flex items-end justify-center p-0 animate-fade-in">
               <div className="bg-bokalia-cream w-full max-w-md rounded-t-[2.5rem] flex flex-col shadow-2xl relative animate-slide-up h-[85vh]">
-                
-                <div className="p-6 pb-4 flex justify-between items-center rounded-t-[2.5rem] sticky top-0 z-10 bg-bokalia-cream">
+                <div className="p-6 pb-4 flex justify-between items-center rounded-t-[2.5rem] sticky top-0 z-10 bg-bokalia-cream border-b border-bokalia-beige">
                    <div>
                       <h3 className="text-2xl font-black text-bokalia-dark tracking-tight">Premios VIP</h3>
                       <p className="text-sm font-bold text-gray-500 mt-1">Tienes <span className="text-bokalia-coral">{modalPremios.puntos} pts</span></p>
                    </div>
                    <button onClick={() => setModalPremios(null)} className="text-gray-400 font-bold text-xl bg-white w-10 h-10 rounded-full flex items-center justify-center shadow-sm active:scale-95 transition-transform border border-bokalia-beige">✕</button>
                 </div>
-
                 <div className="flex-grow overflow-y-auto p-5 space-y-4">
                    {recompensas.filter(r => r.restaurante_id === modalPremios.restaurante?.id).length === 0 ? (
-                      <div className="p-8 text-center opacity-50 mt-10">
-                         <p className="text-5xl mb-4">🎁</p>
-                         <p className="font-medium text-gray-600">Catálogo en preparación.</p>
-                      </div>
+                      <div className="p-8 text-center opacity-50 mt-10"><p className="text-5xl mb-4">🎁</p><p className="font-medium text-gray-600">Catálogo en preparación.</p></div>
                    ) : (
                       recompensas.filter(r => r.restaurante_id === modalPremios.restaurante?.id).map(premio => {
                          const puedoCanjear = modalPremios.puntos >= premio.coste_puntos;
                          return (
                             <div key={premio.id} className="bg-white rounded-3xl shadow-sm border border-bokalia-beige overflow-hidden flex flex-col">
-                               <div className="h-40 bg-gray-100 shrink-0 relative">
-                                  <img src={premio.imagen_url} className="w-full h-full object-cover" />
-                               </div>
+                               <div className="h-40 bg-gray-100 shrink-0 relative"><img src={premio.imagen_url} className="w-full h-full object-cover" /></div>
                                <div className="p-5 flex flex-col flex-grow">
                                   <h4 className="font-bold text-bokalia-dark text-lg leading-tight mb-2">{premio.titulo}</h4>
                                   <p className="text-xs text-gray-500 font-medium mb-6 leading-relaxed line-clamp-2">{premio.descripcion}</p>
-                                  
                                   <div className="mt-auto">
                                      {puedoCanjear ? (
                                         <button onClick={intentarCanjear} className="w-full bg-bokalia-coral text-white font-bold py-3.5 rounded-2xl text-sm shadow-lg shadow-bokalia-coral/30 active:scale-95 transition-transform flex justify-between px-6 items-center">
-                                           <span>Canjear</span>
-                                           <span>{premio.coste_puntos} pts</span>
+                                           <span>Canjear</span><span>{premio.coste_puntos} pts</span>
                                         </button>
                                      ) : (
                                         <button disabled className="w-full bg-bokalia-beige text-gray-400 font-bold py-3.5 rounded-2xl text-sm flex justify-between px-6 items-center">
-                                           <span>Te faltan {premio.coste_puntos - modalPremios.puntos} pts</span>
-                                           <span>{premio.coste_puntos} pts</span>
+                                           <span>Faltan {premio.coste_puntos - modalPremios.puntos} pts</span><span>{premio.coste_puntos} pts</span>
                                         </button>
                                      )}
                                   </div>
@@ -475,7 +472,45 @@
             </div>
           )}
 
-          {/* 🔥 NUEVO MODAL ERROR CANJEO (CENTRADO) 🔥 */}
+          {/* 🔥 MODAL: NIVELES VIP (NUEVO) 🔥 */}
+          {modalNiveles && (
+            <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-sm z-[150] flex items-end justify-center p-0 animate-fade-in">
+              <div className="bg-bokalia-cream w-full max-w-md rounded-t-[2.5rem] flex flex-col shadow-2xl relative animate-slide-up h-[85vh]">
+                <div className="p-6 pb-4 flex justify-between items-center rounded-t-[2.5rem] sticky top-0 z-10 bg-bokalia-cream border-b border-bokalia-beige">
+                   <div>
+                      <h3 className="text-2xl font-black text-bokalia-dark tracking-tight">Rangos VIP</h3>
+                      <p className="text-sm font-bold text-gray-500 mt-1">Tienes <span className="text-bokalia-coral">{modalNiveles.puntos} pts</span></p>
+                   </div>
+                   <button onClick={() => setModalNiveles(null)} className="text-gray-400 font-bold text-xl bg-white w-10 h-10 rounded-full flex items-center justify-center shadow-sm active:scale-95 transition-transform border border-bokalia-beige">✕</button>
+                </div>
+                <div className="flex-grow overflow-y-auto p-5 space-y-4">
+                   {niveles.filter(n => n.restaurante_id === modalNiveles.restaurante?.id).length === 0 ? (
+                      <div className="p-8 text-center opacity-50 mt-10"><p className="text-5xl mb-4">⭐</p><p className="font-medium text-gray-600">No hay rangos definidos.</p></div>
+                   ) : (
+                      niveles.filter(n => n.restaurante_id === modalNiveles.restaurante?.id).map((nivel, idx) => {
+                         const superado = modalNiveles.puntos >= nivel.puntos_minimos;
+                         return (
+                            <div key={nivel.id} className={`bg-white rounded-3xl p-5 shadow-sm border ${superado ? 'border-bokalia-coral/30' : 'border-bokalia-beige'} flex items-center justify-between`}>
+                               <div className="flex items-center gap-4">
+                                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center font-black text-white text-xl shadow-md" style={{ backgroundColor: nivel.color }}>
+                                     {idx + 1}
+                                  </div>
+                                  <div>
+                                     <h4 className="font-bold text-bokalia-dark text-lg">{nivel.nombre}</h4>
+                                     <p className="text-xs font-medium text-gray-400">A partir de {nivel.puntos_minimos} pts</p>
+                                  </div>
+                               </div>
+                               <div>{superado ? <span className="text-2xl">✅</span> : <span className="text-2xl opacity-30">🔒</span>}</div>
+                            </div>
+                         )
+                      })
+                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL ERROR CANJEO (CENTRADO) */}
           {modalErrorCanjeo && (
              <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-md z-[300] flex items-center justify-center p-4 animate-fade-in">
                 <div className="bg-white w-full max-w-xs rounded-[2rem] p-8 text-center shadow-2xl relative animate-slide-up border border-bokalia-beige">
@@ -487,14 +522,14 @@
              </div>
           )}
 
-          {/* 🔥 NUEVO MODAL NOTIFICACIONES PUSH (TIEMPO REAL) 🔥 */}
+          {/* MODAL NOTIFICACIONES PUSH (TIEMPO REAL) */}
           {notificacionActiva && (
              <div className="fixed inset-0 bg-bokalia-dark/60 backdrop-blur-md z-[300] flex items-center justify-center p-4 animate-fade-in">
                 <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 text-center shadow-2xl relative animate-slide-up border-4 border-bokalia-beige">
                    <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 bg-bokalia-coral text-white text-3xl w-14 h-14 rounded-full flex items-center justify-center shadow-lg border-4 border-white">📣</div>
                    <h3 className="text-2xl font-black text-bokalia-dark mb-3 mt-6 tracking-tight">{notificacionActiva.titulo}</h3>
                    <p className="text-sm text-gray-600 font-medium mb-8 leading-relaxed">{notificacionActiva.mensaje}</p>
-                   <button onClick={() => setNotificacionActiva(null)} className="w-full bg-bokalia-dark text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-transform">Ver menú</button>
+                   <button onClick={() => setNotificacionActiva(null)} className="w-full bg-bokalia-dark text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-transform">Cerrar aviso</button>
                 </div>
              </div>
           )}
