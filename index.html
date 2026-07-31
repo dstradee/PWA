@@ -108,7 +108,6 @@
       const [showModoMesa, setShowModoMesa] = useState(false);
       const [showJoinPrompt, setShowJoinPrompt] = useState(false);
       
-      // 🔥 ESTADO DE EXPULSIÓN INMEDIATA
       const [fuerzaTutorial, setFuerzaTutorial] = useState(false);
       const [toastMsg, setToastMsg] = useState('');
 
@@ -189,23 +188,18 @@
         if (data) setProductos(data);
       };
 
-      // 🔥 LÓGICA VIGILANTE ACTUALIZADA 🔥
+      // 🔥 VIGILANTE DE MESA INTELIGENTE (Soluciona el problema de que el siguiente usuario no pueda pedir) 🔥
       const verificarSesionMesa = async () => {
         const { data } = await supabase.from('sesiones_mesa')
           .select('*, host:usuarios(nombre, email)')
           .eq('num_mesa', mesaParam)
           .eq('restaurante_id', RESTAURANTE_ID)
-          .order('id', { ascending: false })
+          .order('creado_en', { ascending: false }) // Cogemos la última creada, sin importar si está pagada o no
           .limit(1)
           .maybeSingle();
         
-        if (data) {
-          // Si la mesa está pagada, ¡Tirón a perfil instantáneo!
-          if (data.estado === 'pagada') {
-             procesarSalidaAPerfil();
-             return;
-          }
-
+        if (data && data.estado !== 'pagada') {
+          // Hay una sesión activa, hacemos la comprobación normal
           if (!user || data.host_id !== user?.id) {
             if (data.compartida === false) {
               setMesaBloqueada(true); setShowJoinPrompt(false);
@@ -221,18 +215,30 @@
           } else {
             setMesaBloqueada(false); setShowJoinPrompt(false); setSesionActiva(data);
           }
+        } else if (data && data.estado === 'pagada') {
+          // La última sesión está pagada. ¿Es NUESTRA sesión que nos la acaban de pagar?
+          if (sesionActiva && sesionActiva.id === data.id) {
+             procesarSalidaAPerfil(); // ¡Tirón a expulsión!
+          } else {
+             // Es una sesión vieja de otro cliente. ¡La mesa está libre!
+             if (!fuerzaTutorial) {
+                setSesionActiva(null); setMesaBloqueada(false); setShowJoinPrompt(false);
+             }
+          }
         } else {
-          setSesionActiva(null); setMesaBloqueada(false); setShowJoinPrompt(false);
+          // No hay ninguna sesión en esta mesa nunca. ¡Mesa libre!
+          if (!fuerzaTutorial) {
+             setSesionActiva(null); setMesaBloqueada(false); setShowJoinPrompt(false);
+          }
         }
       };
 
-      // 🔥 EXPULSIÓN Y TUTORIAL 🔥
       const procesarSalidaAPerfil = () => {
          const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
          if (!isStandalone) {
-            setFuerzaTutorial(true); // Levanta el telón de pantalla completa
+            setFuerzaTutorial(true); 
          } else {
-            window.location.href = 'perfil.html'; // Tironazo a su perfil
+            window.location.href = 'perfil.html'; 
          }
       };
 
@@ -352,7 +358,6 @@
       // UI Y VISTAS
       // ==========================================
 
-      // 🔥 1. PANTALLA EXCLUSIVA DE EXPULSIÓN INSTANTÁNEA (NO TE DEJA HACER NADA MÁS)
       if (fuerzaTutorial) {
          return (
             <div className="min-h-screen bg-texture flex flex-col justify-center items-center p-6 text-center z-[999] absolute inset-0">
@@ -417,10 +422,10 @@
       return (
         <div className="pb-36 min-h-screen relative flex flex-col">
           
-          {/* 🔥 TOAST RECTO Y CENTRADO 🔥 */}
+          {/* 🔥 TOAST RECTO Y CENTRADO PERFECTO 🔥 */}
           {toastMsg && (
-            <div className="fixed top-24 inset-x-0 flex justify-center z-[60] pointer-events-none px-4 animate-fade-in">
-              <div className="bg-bokalia-dark text-white font-bold px-6 py-4 rounded-2xl shadow-elegant text-center max-w-sm w-full shadow-lg">
+            <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[60] pointer-events-none animate-fade-in w-[90%] max-w-sm flex justify-center">
+              <div className="bg-bokalia-dark text-white font-bold px-6 py-4 rounded-2xl shadow-elegant-lg text-center w-full">
                 {toastMsg}
               </div>
             </div>
