@@ -12,28 +12,27 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
-    body { font-family: system-ui, sans-serif; background: #f9fafb; margin: 0; -webkit-tap-highlight-color: transparent; }
+    body { font-family: system-ui, sans-serif; background: #111827; margin: 0; -webkit-tap-highlight-color: transparent; }
     @keyframes slideUp { from { transform: translate3d(0, 100%, 0); } to { transform: translate3d(0, 0, 0); } }
     .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     @keyframes fadeIn { from { opacity: 0; transform: translate3d(0, -10px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
     .animate-fade-in { animation: fadeIn 0.2s ease forwards; }
     .mobile-container { transform: translate(0); }
+    .custom-scrollbar::-webkit-scrollbar { height: 0px; display: none; }
+    .custom-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
 </head>
 <body class="flex justify-center min-h-screen bg-gray-900">
   
   <div id="root" class="w-full max-w-md bg-gray-50 min-h-screen relative overflow-x-hidden shadow-2xl mobile-container pb-10">
-    <!-- PANTALLA DE CARGA NATIVA -->
     <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; color:#dc2626;">
       <h1 style="font-size:3rem; font-weight:900;">BOKALIA</h1>
-      <p style="font-weight:bold; margin-top:10px; opacity:0.7;">Cargando perfil...</p>
     </div>
   </div>
 
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // ESCUDO ANTI-CRASHEOS
     class ErrorBoundary extends React.Component {
       constructor(props) { super(props); this.state = { hasError: false, error: null }; }
       static getDerivedStateFromError(error) { return { hasError: true, error }; }
@@ -60,9 +59,10 @@
       const [vistaActual, setVistaActual] = useState('inicio'); 
       const [loading, setLoading] = useState(true);
       const [user, setUser] = useState(null);
+      const [userProfile, setUserProfile] = useState(null);
       const [wallets, setWallets] = useState([]); 
       const [historial, setHistorial] = useState([]);
-      const [sugerencias, setSugerencias] = useState([]); // 🔥 Los restaurantes recomendados
+      const [sugerencias, setSugerencias] = useState([]); 
       
       const [showAuthModal, setShowAuthModal] = useState(false);
       const [authMode, setAuthMode] = useState('login'); 
@@ -75,7 +75,6 @@
       useEffect(() => {
         const safeTimer = setTimeout(() => { setLoading(false); }, 2500);
 
-        // Cargamos los restaurantes sugeridos de la base de datos nada más abrir la app
         cargarSugerencias();
 
         supabase.auth.getSession().then(({ data }) => {
@@ -85,7 +84,7 @@
 
         const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
           if (session?.user) procesarUsuario(session.user);
-          else { setUser(null); setWallets([]); setHistorial([]); setLoading(false); }
+          else { setUser(null); setUserProfile(null); setWallets([]); setHistorial([]); setLoading(false); }
         });
 
         return () => { clearTimeout(safeTimer); if (authListener?.subscription) authListener.subscription.unsubscribe(); };
@@ -93,31 +92,28 @@
 
       const cargarSugerencias = async () => {
          try {
-            // Traemos hasta 6 restaurantes ordenados por los más nuevos
-            const { data } = await supabase.from('restaurantes').select('id, nombre, color_tema').order('creado_en', { ascending: false }).limit(6);
+            const { data } = await supabase.from('restaurantes').select('id, nombre, color_tema').order('creado_en', { ascending: false }).limit(20);
             if (data) setSugerencias(data);
-         } catch(e) { console.error("Error al cargar sugerencias", e); }
+         } catch(e) { console.error(e); }
       };
 
       const procesarUsuario = async (authUser) => {
         setUser(authUser);
         try {
-          // 1. Buscamos usuario en BD
           let { data: perfil } = await supabase.from('usuarios').select('id').eq('id', authUser.id).maybeSingle();
           if (!perfil) {
              await supabase.from('usuarios').insert([{ id: authUser.id, email: authUser.email }]);
           }
 
-          // 2. Traer carteras Y EL COLOR EXACTO DEL RESTAURANTE 🎨
           const { data: misPuntos } = await supabase.from('puntos_fidelizacion')
-            .select('puntos, restaurante:restaurantes(nombre, color_tema)')
+            .select('puntos, restaurante:restaurantes(id, nombre, color_tema)')
             .eq('usuario_id', authUser.id);
             
           if (misPuntos) setWallets(misPuntos);
 
-          // 3. Traer el historial completo de 6 meses
           const seisMesesAtras = new Date();
           seisMesesAtras.setMonth(seisMesesAtras.getMonth() - 6);
+          
           const { data: dataHistorial } = await supabase.from('pedidos_rondas')
             .select('id, fecha, estado, sesion:sesiones_mesa!inner(estado, restaurante:restaurantes(nombre, color_tema)), items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))')
             .eq('usuario_id', authUser.id).eq('oculto_usuario', false).eq('sesiones_mesa.estado', 'pagada')
@@ -153,9 +149,10 @@
 
       const mostrarToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 4000); };
 
-      // ==========================================
-      // UI Y VISTAS
-      // ==========================================
+      // Filtros calculados
+      const walletsConPuntos = wallets.filter(w => w.puntos > 0);
+      const restaurantesConPuntosIds = walletsConPuntos.map(w => w.restaurante?.id);
+      const sugerenciasFiltradas = sugerencias.filter(rest => !restaurantesConPuntosIds.includes(rest.id));
 
       if (loading) {
          return (
@@ -177,7 +174,6 @@
             </div>
           )}
 
-          {/* CABECERA */}
           <header className="bg-red-600 text-white p-5 shadow-md flex justify-between items-center rounded-b-3xl z-10 relative">
             <h1 className="font-black text-3xl text-yellow-400 tracking-tighter">BOKALIA</h1>
             {user ? (
@@ -195,10 +191,10 @@
 
           <main className="flex-grow p-4 z-0 relative animate-fade-in">
             
-            {/* VISTA 1: INICIO / WALLETS MULTIPLES */}
             {vistaActual === 'inicio' && (
                <>
-                  {!user ? (
+                  {/* BLOQUE NO LOGUEADO */}
+                  {!user && (
                      <div className="relative overflow-hidden rounded-[2.5rem] p-8 shadow-xl bg-gradient-to-br from-gray-800 to-black text-white cursor-pointer mt-4" onClick={() => { setAuthMode('register'); setShowAuthModal(true); }}>
                        <div className="absolute inset-0 bg-black/60 z-10 flex flex-col items-center justify-center text-center p-6 backdrop-blur-sm">
                            <div className="text-5xl mb-4">🎁</div>
@@ -211,20 +207,24 @@
                            <p className="text-5xl font-black mb-4">0 pts</p>
                        </div>
                      </div>
-                  ) : wallets.length === 0 ? (
+                  )}
+
+                  {/* BLOQUE LOGUEADO - SIN PUNTOS */}
+                  {user && walletsConPuntos.length === 0 && (
                      <div className="bg-white border-2 border-dashed border-gray-200 p-8 rounded-[2rem] text-center mt-4">
                         <span className="text-5xl block mb-4">💳</span>
                         <h3 className="text-xl font-black text-gray-800 mb-2">Aún no tienes puntos</h3>
-                        <p className="text-sm text-gray-500 font-medium">Escanea un código en tu próxima visita a cualquier local Bokalia para empezar a sumar puntos en tus restaurantes favoritos.</p>
+                        <p className="text-sm text-gray-500 font-medium">Escanea un código en tu próxima visita a cualquier local Bokalia para empezar a sumar puntos.</p>
                      </div>
-                  ) : (
+                  )}
+
+                  {/* BLOQUE LOGUEADO - CON PUNTOS */}
+                  {user && walletsConPuntos.length > 0 && (
                      <div className="space-y-4 mt-4">
-                        {wallets.map((w, idx) => {
-                           const bgColor = w.restaurante?.color_tema || '#dc2626'; // Lee el color de Supabase
-                           
+                        {walletsConPuntos.map((w, idx) => {
+                           const bgColor = w.restaurante?.color_tema || '#dc2626'; 
                            return (
-                             <div key={idx} className="relative overflow-hidden rounded-[2.5rem] p-8 shadow-xl text-white border border-white/20" 
-                                  style={{ background: `linear-gradient(135deg, ${bgColor}, #111827)` }}>
+                             <div key={idx} className="relative overflow-hidden rounded-[2.5rem] p-8 shadow-xl text-white border border-white/20" style={{ background: `linear-gradient(135deg, ${bgColor}, #111827)` }}>
                                <div className="absolute -right-12 -top-12 w-48 h-48 rounded-full bg-white opacity-10"></div>
                                <div className="absolute -left-8 -bottom-8 w-32 h-32 rounded-full bg-white opacity-5"></div>
                                
@@ -253,23 +253,22 @@
                      </div>
                   )}
 
-                  {/* 🔥 NUEVO: SECCIÓN DE CROSS-SELLING (DESCUBRE MÁS LOCALES) 🔥 */}
-                  {sugerencias.length > 0 && (
+                  {/* BLOQUE CROSS-SELLING */}
+                  {sugerenciasFiltradas.length > 0 && (
                      <div className="mt-10">
                         <h2 className="text-2xl font-black text-gray-800 mb-2 tracking-tight flex items-center gap-2">
                            <span>📍</span> Descubre más locales
                         </h2>
-                        <p className="text-gray-500 text-sm font-medium mb-6">Visita nuestros restaurantes asociados y suma puntos en tu Wallet Universal Bokalia.</p>
+                        <p className="text-gray-500 text-sm font-medium mb-6">Visita nuestros restaurantes asociados y suma puntos en tu Wallet Bokalia.</p>
                         
-                        <div className="grid grid-cols-2 gap-4">
-                           {sugerencias.map(rest => (
-                              <div key={rest.id} className="relative overflow-hidden p-5 rounded-3xl shadow-md border border-white/20 text-white" 
-                                   style={{ background: `linear-gradient(135deg, ${rest.color_tema || '#dc2626'}, #111827)` }}>
+                        <div className="grid gap-4 overflow-x-auto pb-4 custom-scrollbar snap-x" style={{ gridTemplateRows: 'repeat(2, 1fr)', gridAutoFlow: 'column', gridAutoColumns: 'calc(50% - 0.5rem)' }}>
+                           {sugerenciasFiltradas.map(rest => (
+                              <div key={rest.id} className="snap-start relative overflow-hidden p-5 rounded-[1.5rem] shadow-sm border border-white/20 text-white flex items-center h-24" style={{ background: `linear-gradient(135deg, ${rest.color_tema || '#dc2626'}, #111827)` }}>
                                  <div className="relative z-10">
-                                    <p className="font-black text-lg leading-tight">{rest.nombre}</p>
-                                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-80 mt-3">Colaborador</p>
+                                    <p className="font-black text-[15px] leading-tight drop-shadow-sm">{rest.nombre}</p>
+                                    <p className="text-[9px] font-bold uppercase tracking-widest opacity-80 mt-1">Colaborador</p>
                                  </div>
-                                 <div className="absolute -right-6 -bottom-6 w-20 h-20 rounded-full bg-white opacity-10"></div>
+                                 <div className="absolute -right-4 -bottom-4 w-16 h-16 rounded-full bg-white opacity-10"></div>
                               </div>
                            ))}
                         </div>
@@ -289,24 +288,28 @@
                </>
             )}
 
-            {/* VISTA 2: HISTORIAL MULTICOLOR */}
+            {/* VISTA 2: HISTORIAL */}
             {vistaActual === 'historial' && (
                <div className="animate-fade-in">
                   <h2 className="text-2xl font-black text-gray-800 mb-6 tracking-tight flex items-center gap-2">
                      <span>🍔</span> Últimos Pedidos
                   </h2>
                   
-                  {!user ? (
+                  {!user && (
                      <div className="bg-white p-8 rounded-[2rem] text-center border-2 border-dashed border-gray-200 mt-4">
-                        <p className="text-gray-500 font-bold mb-6">Inicia sesión para ver tu historial.</p>
+                        <p className="text-gray-500 font-bold mb-6">Inicia sesión para ver tu historial de visitas antiguas.</p>
                         <button onClick={() => setShowAuthModal(true)} className="bg-red-600 text-white px-8 py-4 rounded-2xl font-black w-full shadow-lg">Entrar ahora</button>
                      </div>
-                  ) : historial.length === 0 ? (
+                  )}
+                  
+                  {user && historial.length === 0 && (
                      <div className="bg-gray-100 p-8 rounded-[2rem] text-center mt-4">
                         <span className="text-4xl grayscale opacity-50 block mb-3">🧾</span>
                         <p className="text-gray-500 font-bold">Aún no hay visitas pagadas.</p>
                      </div>
-                  ) : (
+                  )}
+
+                  {user && historial.length > 0 && (
                      <div className="space-y-4">
                         {historial.map((h) => {
                            const total = h.items.reduce((acc, item) => acc + (item.cantidad * item.precio_unitario), 0);
@@ -315,12 +318,12 @@
                               <div key={h.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
                                 <div className="flex justify-between items-center border-b border-gray-100 pb-3 mb-3">
                                   <div>
-                                     <span className="text-[10px] font-black text-white px-2 py-1 rounded-md uppercase shadow-sm" style={{ backgroundColor: colorLocal }}>
+                                     <span className="text-[10px] font-black text-white px-2 py-1 rounded-md uppercase" style={{ backgroundColor: colorLocal }}>
                                        {h.sesion?.restaurante?.nombre || 'Local Bokalia'}
                                      </span>
                                      <span className="text-[10px] font-bold text-gray-400 block mt-2">{formatDate(h.fecha)}</span>
                                   </div>
-                                  <span className="text-xl font-black text-gray-800">{formatMoney(total)}€</span>
+                                  <span className="text-lg font-black text-gray-800">{formatMoney(total)}€</span>
                                 </div>
                                 <ul className="text-sm text-gray-700 space-y-2">
                                   {h.items.map((item, idx) => (
@@ -334,7 +337,7 @@
                            );
                         })}
                         <button onClick={borrarHistorial} className="w-full mt-6 bg-gray-100 text-gray-500 font-bold py-4 rounded-2xl active:bg-gray-200 transition-colors">
-                           Limpiar historial
+                           Limpiar historial visual
                         </button>
                      </div>
                   )}
@@ -349,7 +352,6 @@
                  <p className="text-gray-500 font-medium text-lg">Estamos preparando el sistema de reservas.</p>
                </div>
             )}
-
           </main>
 
           {/* MODALES FLOTANTES */}
@@ -359,10 +361,8 @@
                 <button onClick={() => setShowAuthModal(false)} className="absolute top-6 right-6 text-gray-400 font-black text-xl bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center">✕</button>
                 <h3 className="text-4xl font-black mb-1 text-gray-800 tracking-tighter">{authMode === 'login' ? 'Hola' : 'Únete'}</h3>
                 <p className="text-gray-500 mb-8 font-medium text-sm">{authMode === 'login' ? 'Entra a tu cuenta.' : 'Crea tu cuenta para ganar puntos.'}</p>
-                
                 <input type="email" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} className="w-full mb-4 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
                 <input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} className="w-full mb-6 p-5 bg-gray-50 border-2 border-gray-100 rounded-2xl outline-none font-bold focus:border-red-500" />
-                
                 <button onClick={handleAuth} className={`w-full text-white font-black py-5 rounded-2xl text-xl active:scale-95 transition-transform mb-4 shadow-lg ${authMode === 'login' ? 'bg-red-600 shadow-red-600/30' : 'bg-yellow-400 text-yellow-900 shadow-yellow-400/50'}`}>
                    {authMode === 'login' ? 'Entrar' : 'Registrarme'}
                 </button>
@@ -378,7 +378,6 @@
                    <div className="text-6xl mb-4 mt-2">📲</div>
                    <h3 className="text-3xl font-black text-gray-800 mb-2 tracking-tighter">Añádenos a tu móvil</h3>
                    <p className="text-gray-500 font-medium mb-8 text-sm">Instala la App en tu pantalla de inicio para entrar más rápido.</p>
-                   
                    <div className="bg-gray-50 p-5 rounded-2xl text-left text-sm font-bold text-gray-700 space-y-4 mb-8 border border-gray-200 shadow-inner">
                       <p className="flex items-start gap-3"><span className="text-xl">1️⃣</span> <span className="mt-1">Toca <b>Compartir</b> en Safari o <b>3 puntitos</b> en Chrome.</span></p>
                       <p className="flex items-center gap-3"><span className="text-xl">2️⃣</span> <span>Desliza por el menú de opciones.</span></p>
