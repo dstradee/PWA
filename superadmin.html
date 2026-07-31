@@ -4,30 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bokalia SuperAdmin</title>
-  
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.20/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  
-  <!-- SCRIPT OFICIAL DE CLOUDINARY -->
   <script src="https://upload-widget.cloudinary.com/global/all.js" type="text/javascript"></script>
 
   <style>
     body { font-family: system-ui, sans-serif; background: #f3f4f6; margin: 0; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
     .animate-fade-in { animation: fadeIn 0.3s ease forwards; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
   </style>
 </head>
 <body class="bg-gray-100 min-h-screen text-gray-800">
-  
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // 🔥 CONFIGURACIÓN DE CLOUDINARY (Rellena esto) 🔥
+    // 🔥 TUS CLAVES DE CLOUDINARY 🔥
     const CLOUDINARY_CLOUD_NAME = "pon_aqui_tu_cloud_name";
     const CLOUDINARY_UPLOAD_PRESET = "pon_aqui_tu_upload_preset";
 
@@ -41,24 +37,23 @@
       const [restaurantes, setRestaurantes] = useState([]);
       const [restauranteActivo, setRestauranteActivo] = useState(null);
       const [productos, setProductos] = useState([]);
-      
-      const [nuevoRestNombre, setNuevoRestNombre] = useState('');
       const [loading, setLoading] = useState(true);
 
-      // Estados para nuevo producto
+      const [nuevoRestNombre, setNuevoRestNombre] = useState('');
+      const [nuevoRestColor, setNuevoRestColor] = useState('#dc2626'); // Rojo por defecto
+
+      // Formulario Producto
       const [prodNombre, setProdNombre] = useState('');
       const [prodDesc, setProdDesc] = useState('');
       const [prodPrecio, setProdPrecio] = useState('');
       const [prodImg, setProdImg] = useState('');
       const [prodCat, setProdCat] = useState('Principal');
 
-      useEffect(() => {
-        cargarRestaurantes();
-      }, []);
+      useEffect(() => { cargarRestaurantes(); }, []);
 
       const cargarRestaurantes = async () => {
         setLoading(true);
-        const { data, error } = await supabase.from('restaurantes').select('*').order('creado_en', { ascending: false });
+        const { data } = await supabase.from('restaurantes').select('*').order('creado_en', { ascending: false });
         if (data) setRestaurantes(data);
         setLoading(false);
       };
@@ -66,31 +61,32 @@
       const crearRestaurante = async (e) => {
         e.preventDefault();
         if (!nuevoRestNombre) return;
-        
-        const { data, error } = await supabase.from('restaurantes').insert([{ nombre: nuevoRestNombre }]).select().single();
+        const { data, error } = await supabase.from('restaurantes').insert([{ nombre: nuevoRestNombre, color_tema: nuevoRestColor }]).select().single();
         if (data) {
            setRestaurantes([data, ...restaurantes]);
-           setNuevoRestNombre('');
+           setNuevoRestNombre(''); setNuevoRestColor('#dc2626');
            alert("✅ Restaurante creado con éxito");
-        } else {
-           alert("Error al crear restaurante: " + error.message);
-        }
+        } else alert("Error: " + error.message);
+      };
+
+      const editarColor = async (id, colorNuevo) => {
+         const { error } = await supabase.from('restaurantes').update({ color_tema: colorNuevo }).eq('id', id);
+         if (!error) {
+            setRestaurantes(restaurantes.map(r => r.id === id ? { ...r, color_tema: colorNuevo } : r));
+            alert("🎨 Color actualizado con éxito.");
+         }
       };
 
       const abrirRestaurante = async (rest) => {
          setRestauranteActivo(rest);
          setVista('restaurante');
-         cargarProductos(rest.id);
-      };
-
-      const cargarProductos = async (idRest) => {
-         const { data } = await supabase.from('productos').select('*').eq('restaurante_id', idRest).order('categoria');
+         const { data } = await supabase.from('productos').select('*').eq('restaurante_id', rest.id).order('categoria');
          if (data) setProductos(data);
       };
 
-      // 🔥 WIDGET DE CLOUDINARY
+      // 🔥 FIX CLOUDINARY DIRECTO
       const abrirCloudinary = () => {
-         const widget = window.cloudinary.createUploadWidget({
+         window.cloudinary.openUploadWidget({
             cloudName: CLOUDINARY_CLOUD_NAME,
             uploadPreset: CLOUDINARY_UPLOAD_PRESET,
             sources: ['local', 'camera', 'url'],
@@ -101,216 +97,146 @@
                alert("📸 Foto subida con éxito");
             }
          });
-         widget.open();
       };
 
       const añadirProducto = async (e) => {
          e.preventDefault();
          if (!prodNombre || !prodPrecio) return alert("Falta nombre o precio");
-
          const nuevoProd = {
-            restaurante_id: restauranteActivo.id,
-            nombre: prodNombre,
-            descripcion: prodDesc,
-            precio: parseFloat(prodPrecio.replace(',','.')),
-            imagen_url: prodImg || 'https://via.placeholder.com/500', 
-            categoria: prodCat,
-            activo: true
+            restaurante_id: restauranteActivo.id, nombre: prodNombre, descripcion: prodDesc,
+            precio: parseFloat(prodPrecio.replace(',','.')), imagen_url: prodImg || 'https://via.placeholder.com/500', 
+            categoria: prodCat, activo: true
          };
-
          const { data, error } = await supabase.from('productos').insert([nuevoProd]).select().single();
-         
          if (data) {
             setProductos([...productos, data]);
             setProdNombre(''); setProdDesc(''); setProdPrecio(''); setProdImg('');
             alert("🍔 Producto añadido al menú");
-         } else {
-            alert("Error al añadir producto: " + error.message);
-         }
+         } else alert("Error: " + error.message);
       };
 
       const borrarProducto = async (id) => {
-         if (window.confirm("¿Seguro que quieres borrar este plato del menú?")) {
+         if (window.confirm("¿Borrar este plato?")) {
             await supabase.from('productos').delete().eq('id', id);
             setProductos(productos.filter(p => p.id !== id));
          }
-      };
-
-      const copiarId = (id) => {
-         navigator.clipboard.writeText(id);
-         alert("🔑 ID Copiado al portapapeles: " + id);
       };
 
       if (loading) return <div className="h-screen flex items-center justify-center font-black text-2xl animate-pulse text-gray-400">Cargando Baticueva...</div>;
 
       return (
          <div className="min-h-screen flex flex-col md:flex-row">
-            
             <aside className="w-full md:w-64 bg-gray-900 text-white flex flex-col shadow-2xl z-10 shrink-0">
                <div className="p-6 border-b border-gray-800 text-center md:text-left">
-                  <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-yellow-500 tracking-tighter">BOKALIA OS</h1>
+                  <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-yellow-500">BOKALIA OS</h1>
                   <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mt-1">SuperAdmin</p>
                </div>
-               <nav className="p-4 flex-grow flex md:flex-col gap-2 overflow-x-auto">
-                  <button onClick={() => setVista('dashboard')} className={`flex-1 md:flex-none text-left px-4 py-3 rounded-xl font-bold transition-colors ${vista === 'dashboard' ? 'bg-red-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>
-                     🏢 Mis Locales
-                  </button>
+               <nav className="p-4 flex-grow">
+                  <button onClick={() => setVista('dashboard')} className={`w-full text-left px-4 py-3 rounded-xl font-bold transition-colors ${vista === 'dashboard' ? 'bg-red-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>🏢 Mis Locales</button>
                </nav>
             </aside>
 
             <main className="flex-grow p-6 md:p-10 overflow-y-auto bg-gray-50 animate-fade-in">
                
-               {/* VISTA 1: DASHBOARD DE LOCALES */}
                {vista === 'dashboard' && (
                   <div className="max-w-5xl mx-auto">
-                     <div className="flex justify-between items-end mb-8">
-                        <div>
-                           <h2 className="text-4xl font-black text-gray-900 tracking-tight">Tus Restaurantes</h2>
-                           <p className="text-gray-500 font-medium mt-2">Gestiona el ecosistema completo desde aquí.</p>
-                        </div>
-                     </div>
+                     <h2 className="text-4xl font-black text-gray-900 mb-8">Tus Restaurantes</h2>
 
+                     {/* CREAR RESTAURANTE (CON COLOR) */}
                      <form onSubmit={crearRestaurante} className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-200 mb-8 flex flex-col md:flex-row gap-4 items-center">
-                        <input 
-                           type="text" placeholder="Ej: Hamburguesería Luigi..." required
-                           value={nuevoRestNombre} onChange={e => setNuevoRestNombre(e.target.value)}
-                           className="flex-grow bg-gray-50 border border-gray-200 p-4 rounded-xl font-bold outline-none focus:border-red-500 transition-colors w-full"
-                        />
-                        <button type="submit" className="bg-gray-900 hover:bg-black text-white font-black px-8 py-4 rounded-xl shadow-lg w-full md:w-auto active:scale-95 transition-transform whitespace-nowrap">
-                           + Añadir Local
-                        </button>
+                        <input type="text" placeholder="Nombre del Local..." required value={nuevoRestNombre} onChange={e => setNuevoRestNombre(e.target.value)} className="flex-grow bg-gray-50 border border-gray-200 p-4 rounded-xl font-bold outline-none w-full" />
+                        
+                        <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-200 w-full md:w-auto">
+                           <label className="text-xs font-bold text-gray-500 uppercase">Color Marca:</label>
+                           <input type="color" value={nuevoRestColor} onChange={e => setNuevoRestColor(e.target.value)} className="w-10 h-10 rounded cursor-pointer border-0 p-0" />
+                        </div>
+
+                        <button type="submit" className="bg-gray-900 hover:bg-black text-white font-black px-8 py-4 rounded-xl w-full md:w-auto">+ Añadir</button>
                      </form>
 
+                     {/* LISTA RESTAURANTES */}
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {restaurantes.map(r => (
-                           <div key={r.id} className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+                           <div key={r.id} className="bg-white p-6 rounded-[2rem] shadow-sm border-t-8 transition-shadow" style={{ borderColor: r.color_tema || '#dc2626' }}>
                               <div className="flex justify-between items-start mb-4">
                                  <h3 className="text-2xl font-black text-gray-800">{r.nombre}</h3>
-                                 <span className="bg-green-100 text-green-700 text-xs font-black px-3 py-1 rounded-full">Activo</span>
+                                 <div className="flex items-center gap-2">
+                                    <input type="color" defaultValue={r.color_tema || '#dc2626'} onBlur={e => editarColor(r.id, e.target.value)} title="Cambiar color" className="w-6 h-6 rounded cursor-pointer" />
+                                 </div>
                               </div>
-                              <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 mb-6 flex justify-between items-center cursor-pointer hover:bg-gray-100" onClick={() => copiarId(r.id)} title="Copiar ID">
+                              <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 mb-6 flex justify-between items-center cursor-pointer hover:bg-gray-100" onClick={() => {navigator.clipboard.writeText(r.id); alert("ID Copiado");}}>
                                  <div>
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ID del Restaurante</p>
+                                    <p className="text-[10px] font-bold text-gray-400 uppercase">ID del Restaurante</p>
                                     <p className="text-sm font-mono text-gray-700 truncate max-w-[200px]">{r.id}</p>
                                  </div>
                                  <span className="text-xl">📋</span>
                               </div>
-                              <button onClick={() => abrirRestaurante(r)} className="w-full bg-red-50 hover:bg-red-100 text-red-600 font-black py-3 rounded-xl transition-colors">
-                                 Gestionar Menú →
-                              </button>
+                              <button onClick={() => abrirRestaurante(r)} className="w-full bg-gray-100 hover:bg-gray-200 text-gray-800 font-black py-3 rounded-xl transition-colors">Gestionar Menú →</button>
                            </div>
                         ))}
                      </div>
                   </div>
                )}
 
-               {/* VISTA 2: GESTIÓN DE MENÚ DE UN LOCAL */}
                {vista === 'restaurante' && restauranteActivo && (
                   <div className="max-w-5xl mx-auto animate-fade-in">
-                     <button onClick={() => setVista('dashboard')} className="text-gray-500 font-bold hover:text-gray-900 mb-6 flex items-center gap-2">
-                        ← Volver a locales
-                     </button>
-                     
-                     <div className="mb-8">
-                        <h2 className="text-4xl font-black text-gray-900 tracking-tight">{restauranteActivo.nombre}</h2>
-                        <p className="text-gray-500 font-medium mt-2">Editor del Menú Digital</p>
-                     </div>
+                     <button onClick={() => setVista('dashboard')} className="text-gray-500 font-bold mb-6">← Volver</button>
+                     <h2 className="text-4xl font-black text-gray-900 mb-8">{restauranteActivo.nombre}</h2>
 
                      <div className="flex flex-col lg:flex-row gap-8">
-                        
-                        {/* FORMULARIO AÑADIR PRODUCTO */}
                         <div className="lg:w-1/3">
                            <form onSubmit={añadirProducto} className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-200 sticky top-6">
                               <h3 className="text-xl font-black text-gray-800 mb-6 border-b border-gray-100 pb-4">Añadir Plato</h3>
                               
                               <div className="space-y-4">
-                                 {/* WIDGET CLOUDINARY */}
+                                 {/* WIDGET CLOUDINARY MEJORADO */}
                                  <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase">Foto del plato</label>
-                                    <div className="mt-1 flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50">
-                                       {prodImg ? (
-                                          <img src={prodImg} className="h-24 w-auto rounded-lg mb-3 shadow-sm" alt="Preview"/>
-                                       ) : (
-                                          <span className="text-3xl grayscale opacity-50 mb-2">📸</span>
-                                       )}
-                                       <button type="button" onClick={abrirCloudinary} className="bg-gray-800 text-white text-xs font-black px-4 py-2 rounded-lg hover:bg-black transition-colors">
-                                          {prodImg ? 'Cambiar Foto' : 'Subir con Cloudinary'}
-                                       </button>
+                                    <label className="text-xs font-bold text-gray-500 uppercase">Foto (Cloudinary URL)</label>
+                                    <div className="mt-1 flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 mb-2">
+                                       {prodImg ? <img src={prodImg} className="h-24 w-auto rounded-lg mb-3" /> : <span className="text-3xl grayscale opacity-50 mb-2">📸</span>}
+                                       <button type="button" onClick={abrirCloudinary} className="bg-blue-600 text-white text-xs font-black px-4 py-2 rounded-lg hover:bg-blue-700">Subir Imagen Mágica</button>
                                     </div>
+                                    <input type="url" value={prodImg} onChange={e => setProdImg(e.target.value)} placeholder="O pega el enlace aquí directamente" className="w-full text-xs p-2 bg-gray-100 rounded-lg outline-none" />
                                  </div>
 
-                                 <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase">Nombre</label>
-                                    <input type="text" required value={prodNombre} onChange={e => setProdNombre(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border border-gray-200 font-bold outline-none focus:border-red-500 mt-1" placeholder="Ej: Burger Triple" />
-                                 </div>
-                                 
+                                 <div><label className="text-xs font-bold text-gray-500">NOMBRE</label><input type="text" required value={prodNombre} onChange={e => setProdNombre(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border" /></div>
                                  <div className="flex gap-4">
-                                    <div className="w-1/2">
-                                       <label className="text-xs font-bold text-gray-500 uppercase">Precio (€)</label>
-                                       <input type="number" step="0.01" required value={prodPrecio} onChange={e => setProdPrecio(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border border-gray-200 font-bold outline-none focus:border-red-500 mt-1" placeholder="8.50" />
-                                    </div>
-                                    <div className="w-1/2">
-                                       <label className="text-xs font-bold text-gray-500 uppercase">Categoría</label>
-                                       <select value={prodCat} onChange={e => setProdCat(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border border-gray-200 font-bold outline-none focus:border-red-500 mt-1">
-                                          <option>Principal</option>
-                                          <option>Entrantes</option>
-                                          <option>Bebidas</option>
-                                          <option>Postres</option>
+                                    <div className="w-1/2"><label className="text-xs font-bold text-gray-500">PRECIO (€)</label><input type="number" step="0.01" required value={prodPrecio} onChange={e => setProdPrecio(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border" /></div>
+                                    <div className="w-1/2"><label className="text-xs font-bold text-gray-500">CATEGORÍA</label>
+                                       <select value={prodCat} onChange={e => setProdCat(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border">
+                                          <option>Principal</option><option>Entrantes</option><option>Bebidas</option><option>Postres</option>
                                        </select>
                                     </div>
                                  </div>
-
-                                 <div>
-                                    <label className="text-xs font-bold text-gray-500 uppercase">Descripción (Opcional)</label>
-                                    <textarea value={prodDesc} onChange={e => setProdDesc(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border border-gray-200 font-bold outline-none focus:border-red-500 mt-1" placeholder="Ingredientes..." rows="2"></textarea>
-                                 </div>
+                                 <div><label className="text-xs font-bold text-gray-500">DESCRIPCIÓN</label><textarea value={prodDesc} onChange={e => setProdDesc(e.target.value)} className="w-full bg-gray-50 p-3 rounded-xl border" rows="2"></textarea></div>
                               </div>
-
-                              <button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-black py-4 rounded-xl mt-6 shadow-md active:scale-95 transition-transform">
-                                 + Guardar en el Menú
-                              </button>
+                              <button type="submit" className="w-full bg-gray-900 text-white font-black py-4 rounded-xl mt-6">Guardar Plato</button>
                            </form>
                         </div>
 
-                        {/* LISTA DEL MENÚ */}
                         <div className="lg:w-2/3">
-                           {productos.length === 0 ? (
-                              <div className="bg-white p-10 rounded-[2rem] text-center border-2 border-dashed border-gray-300">
-                                 <span className="text-6xl grayscale opacity-50 mb-4 block">🍔</span>
-                                 <h3 className="text-xl font-black text-gray-400">Menú vacío</h3>
-                                 <p className="text-gray-400 font-medium">Añade platos usando el formulario.</p>
-                              </div>
-                           ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                 {productos.map(p => (
-                                    <div key={p.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col hover:shadow-md transition-shadow">
-                                       <div className="h-32 bg-gray-200 relative group">
-                                          <img src={p.imagen_url} className="w-full h-full object-cover" alt="Foto Plato"/>
-                                          <button onClick={() => borrarProducto(p.id)} className="absolute top-2 right-2 bg-red-600 text-white w-8 h-8 rounded-full font-black opacity-0 group-hover:opacity-100 transition-opacity shadow-md">✕</button>
-                                       </div>
-                                       <div className="p-4 flex flex-col flex-grow">
-                                          <div className="flex justify-between items-start mb-1">
-                                             <h4 className="font-black text-gray-800 leading-tight pr-2">{p.nombre}</h4>
-                                             <span className="bg-gray-100 text-gray-500 text-[10px] font-black px-2 py-1 rounded uppercase tracking-widest">{p.categoria}</span>
-                                          </div>
-                                          <p className="text-gray-400 text-xs font-medium mb-3 line-clamp-2">{p.descripcion || 'Sin descripción'}</p>
-                                          <p className="text-xl font-black text-green-600 mt-auto">{p.precio}€</p>
-                                       </div>
+                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              {productos.map(p => (
+                                 <div key={p.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+                                    <div className="h-32 bg-gray-200 relative group">
+                                       <img src={p.imagen_url} className="w-full h-full object-cover"/>
+                                       <button onClick={() => borrarProducto(p.id)} className="absolute top-2 right-2 bg-red-600 text-white w-8 h-8 rounded-full font-black opacity-0 group-hover:opacity-100">✕</button>
                                     </div>
-                                 ))}
-                              </div>
-                           )}
+                                    <div className="p-4 flex flex-col flex-grow">
+                                       <h4 className="font-black text-gray-800">{p.nombre}</h4>
+                                       <p className="text-xl font-black text-green-600 mt-auto">{p.precio}€</p>
+                                    </div>
+                                 </div>
+                              ))}
+                           </div>
                         </div>
-
                      </div>
                   </div>
                )}
-
             </main>
          </div>
       );
     }
-
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<SuperAdminApp />);
   </script>
