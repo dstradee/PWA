@@ -19,6 +19,8 @@
       100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
     }
     .animate-blink { animation: blinkAmber 2s infinite; border-color: #f59e0b !important; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-fade-in { animation: fadeIn 0.3s ease forwards; }
   </style>
 </head>
 <body>
@@ -26,6 +28,9 @@
 
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
+
+    // 🔥 EL ID DE TU RESTAURANTE (BOKALIA) 🔥
+    const RESTAURANTE_ID = 'a5f65b60-0a06-4ed3-9c40-fbbf5f85901a';
 
     const supabase = window.supabase.createClient(
       'https://bswlriuzeintgjioywtz.supabase.co',
@@ -36,11 +41,12 @@
       const [mesas, setMesas] = useState([]);
       const [conexionDb, setConexionDb] = useState('conectando'); 
       const [notifPerm, setNotifPerm] = useState('default');
+      const [procesandoId, setProcesandoId] = useState(null); 
+      const [toastMsg, setToastMsg] = useState('');
       
-      // Para no enviar 20 notificaciones de la misma mesa, guardamos memoria de a quién hemos avisado
       const mesasNotificadas = useRef(new Set());
 
-      // 1. INICIALIZAR Y PEDIR PERMISOS PARA NOTIFICACIONES DEL IPAD
+      // 1. INICIALIZAR Y PEDIR PERMISOS PARA NOTIFICACIONES
       useEffect(() => {
          if ('Notification' in window) {
             setNotifPerm(Notification.permission);
@@ -55,14 +61,14 @@
          try {
             const permission = await Notification.requestPermission();
             setNotifPerm(permission);
-            if (permission === 'granted') alert("¡Notificaciones de Barra activadas! 🔔");
+            if (permission === 'granted') mostrarToast("¡Notificaciones de Barra activadas! 🔔");
             else alert("Avisos bloqueados. Actívalos en los Ajustes del dispositivo.");
          } catch (error) {
             console.error("Error al pedir notificaciones:", error);
          }
       };
 
-      // 2. CARGAR MESAS DE LA BASE DE DATOS
+      // 2. CARGAR MESAS DE LA BASE DE DATOS (Solo las de TU Restaurante)
       const cargarMesasActivas = async () => {
          try {
             const { data, error } = await supabase.from('sesiones_mesa')
@@ -74,6 +80,7 @@
                      items:items_pedido(cantidad, precio_unitario, producto:productos(nombre))
                   )
                `)
+               .eq('restaurante_id', RESTAURANTE_ID) // FILTRO MARCA BLANCA
                .in('estado', ['activa', 'pagando']);
                
             if (error) throw error;
@@ -83,7 +90,6 @@
                let totalMesa = 0;
                
                mesa.rondas.forEach(ronda => {
-                  // Lo que está en el carrito sin enviar no se cobra
                   if (ronda.estado === 'pendiente' || ronda.estado === 'listo') return; 
                   
                   const userId = ronda.usuario_id;
@@ -94,7 +100,7 @@
                   }
                   
                   ronda.items.forEach(item => {
-                     const costeItem = item.cantidad * item.precio_unitario;
+                     const costeItem = parseInt(item.cantidad) * parseFloat(item.precio_unitario);
                      usuariosMap[userId].subtotal += costeItem;
                      usuariosMap[userId].items.push(item);
                      totalMesa += costeItem;
@@ -105,10 +111,8 @@
             });
             
             setMesas(mesasProcesadas);
-            setConexionDb('conectado');
          } catch (e) {
             console.error("Error DB:", e);
-            setConexionDb('desconectado');
          }
       };
 
@@ -128,31 +132,34 @@
             })
             .subscribe((status) => {
                if (status === 'SUBSCRIBED') setConexionDb('conectado');
-               else setConexionDb('desconectado');
+               else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') setConexionDb('desconectado');
             });
 
-         // INYECCIÓN DE CAFEÍNA: Si se desconecta, recarga las mesas automáticamente para reenganchar.
-         const reconexionInterval = setInterval(() => {
-            if (conexionDb === 'desconectado') cargarMesasActivas();
-         }, 5000);
+         // Inyección de Cafeína: Evita que el iPad corte el Wi-Fi
+         const pingInterval = setInterval(async () => {
+            const { error } = await supabase.from('productos').select('id').limit(1);
+            if (error) setConexionDb('desconectado');
+            else if (conexionDb === 'desconectado') {
+               setConexionDb('conectado');
+               cargarMesasActivas();
+            }
+         }, 15000);
 
          return () => {
             supabase.removeChannel(canalCaja);
-            clearInterval(reconexionInterval);
+            clearInterval(pingInterval);
          };
       }, [conexionDb]);
 
-      // 4. CONTROLADOR DE NOTIFICACIONES PUSH AL IPAD
+      // 4. CONTROLADOR DE NOTIFICACIONES PUSH
       useEffect(() => {
          mesas.forEach(mesa => {
-            // Si la mesa pide cuenta y no la habíamos notificado antes
             if (mesa.estado === 'pagando' && !mesasNotificadas.current.has(mesa.id)) {
-               mesasNotificadas.current.add(mesa.id); // La marcamos como notificada
-               
+               mesasNotificadas.current.add(mesa.id);
                if (notifPerm === 'granted') {
-                  new Notification('🔥 ¡Mesa Pidiendo Cuenta!', {
+                  new Notification('🔥 ¡Piden la Cuenta!', {
                      body: `La Mesa ${mesa.num_mesa} quiere pagar el total de ${Number(mesa.totalConsolidado).toFixed(2)}€.`,
-                     icon: 'https://cdn-icons-png.flaticon.com/512/3514/3514491.png' // Icono de ticket
+                     icon: 'https://cdn-icons-png.flaticon.com/512/3514/3514491.png'
                   });
                }
             }
@@ -161,34 +168,44 @@
 
       // 5. BOTÓN MAESTRO: CUENTA PAGADA
       const handleCompleteTable = async (mesa) => {
+         setProcesandoId(mesa.id);
          try {
-            // A: Cambiamos estado de la mesa en la base de datos a pagada
+            // A: Cambiamos estado de la mesa a pagada
+            // Al hacer esto, el "Trigger Robot" de Supabase reparte los puntos en el backend y notifica al móvil del cliente.
             const { error: errMesa } = await supabase.from('sesiones_mesa').update({ estado: 'pagada' }).eq('id', mesa.id);
-            if (errMesa) throw new Error("Fallo al actualizar la mesa: " + errMesa.message);
+            if (errMesa) throw new Error(errMesa.message);
             
-            // B: Disparamos el contador de Reseñas de 5 minutos en el backend
-            try {
-               const programadoPara = new Date(Date.now() + 5 * 60000).toISOString();
-               await supabase.from('resenas_pendientes').insert([{ sesion_id: mesa.id, programado_para: programadoPara }]);
-            } catch(e) { console.warn("No se pudo programar reseña, pero la mesa se cobró"); }
-
-            // C: Limpiar historial visual del iPad y de notificaciones
+            // B: Limpiar historial visual del iPad
             mesasNotificadas.current.delete(mesa.id);
-            setMesas(mesas.filter(m => m.id !== mesa.id));
+            setMesas(prevMesas => prevMesas.filter(m => m.id !== mesa.id));
             
-            // D: Damos un feedback de que todo ha ido genial
-            console.log("✅ Mesa cobrada exitosamente.");
-            
+            mostrarToast(`✅ Mesa ${mesa.num_mesa} cobrada con éxito`);
          } catch (error) {
-            // Cazador de errores: Si algo falla, te lo dice en un alert
             alert("❌ ERROR AL COBRAR: " + error.message);
+         } finally {
+            setProcesandoId(null);
          }
+      };
+
+      const mostrarToast = (msg) => {
+         setToastMsg(msg);
+         setTimeout(() => setToastMsg(''), 4000);
       };
 
       // --- RENDERIZADO UI ---
       return (
-         <div className="min-h-screen bg-gray-100 flex flex-col">
-            <header className="bg-gray-900 text-white p-6 shadow-md flex justify-between items-center">
+         <div className="min-h-screen bg-gray-100 flex flex-col relative">
+            
+            {/* TOAST DE FEEDBACK */}
+            {toastMsg && (
+               <div className="fixed top-24 left-1/2 transform -translate-x-1/2 z-50 animate-fade-in shadow-2xl">
+                  <div className="bg-green-500 text-white font-black px-8 py-4 rounded-full flex items-center shadow-lg border-4 border-green-400">
+                     <span>{toastMsg}</span>
+                  </div>
+               </div>
+            )}
+
+            <header className="bg-gray-900 text-white p-6 shadow-md flex justify-between items-center z-10 relative">
                <div className="flex items-center gap-4">
                   <h1 className="text-2xl font-black tracking-widest text-yellow-400">BOKALIA CAJA</h1>
                   <span className="bg-gray-800 px-3 py-1 rounded-lg text-xs font-bold uppercase border border-gray-700">iPad Camarero</span>
@@ -267,10 +284,14 @@
                               
                               <button 
                                  onClick={() => handleCompleteTable(mesa)}
-                                 disabled={mesa.estado !== 'pagando'}
-                                 className={`w-full py-4 rounded-2xl font-black text-lg transition-transform ${mesa.estado === 'pagando' ? 'bg-green-500 text-white shadow-lg active:scale-95 hover:bg-green-600' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                                 disabled={mesa.estado !== 'pagando' || procesandoId === mesa.id}
+                                 className={`w-full py-4 rounded-2xl font-black text-lg transition-transform ${
+                                    procesandoId === mesa.id ? 'bg-gray-400 text-white cursor-wait' :
+                                    mesa.estado === 'pagando' ? 'bg-green-500 text-white shadow-lg active:scale-95 hover:bg-green-600' : 
+                                    'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                 }`}
                               >
-                                 {mesa.estado === 'pagando' ? '✓ MARCAR COMO PAGADA' : 'Esperando solicitud...'}
+                                 {procesandoId === mesa.id ? 'Cobrando...' : mesa.estado === 'pagando' ? '✓ MARCAR COMO PAGADA' : 'Esperando solicitud...'}
                               </button>
                            </div>
 
